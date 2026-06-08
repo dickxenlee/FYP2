@@ -1,0 +1,170 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Dashboard — QA Analyzer{% endblock %}
+
+{% block body %}
+<nav class="navbar">
+    <div class="navbar-brand">
+        <span class="brand-icon">⚙</span>
+        Automated Requirements Analysis and Test Scenario Generation
+    </div>
+    <ul class="navbar-links">
+        <li><a href="{% url 'workspace' %}">Workspace</a></li>
+        <li><a href="{% url 'about' %}">About Us</a></li>
+        <li><a href="{% url 'logout' %}" class="btn btn-outline">Sign Out</a></li>
+    </ul>
+</nav>
+
+<div class="dash-page">
+    <div class="dash-header">
+        <h1>Dashboard</h1>
+        <p>Analytics overview for <strong>{{ user.username }}</strong></p>
+    </div>
+
+    <!-- Summary cards -->
+    <div class="dash-cards">
+        <div class="dash-card">
+            <div class="dash-card-icon">📋</div>
+            <div class="dash-card-value">{{ total }}</div>
+            <div class="dash-card-label">Requirements Analyzed</div>
+        </div>
+        <div class="dash-card">
+            <div class="dash-card-icon">📊</div>
+            <div class="dash-card-value">{{ avg_score }}%</div>
+            <div class="dash-card-label">Average Quality Score</div>
+        </div>
+        <div class="dash-card">
+            <div class="dash-card-icon">🧪</div>
+            <div class="dash-card-value">{{ total_scenarios }}</div>
+            <div class="dash-card-label">Test Scenarios Generated</div>
+        </div>
+        <div class="dash-card">
+            <div class="dash-card-icon">👍</div>
+            <div class="dash-card-value">{{ useful_count }}</div>
+            <div class="dash-card-label">Scenarios Rated Useful</div>
+        </div>
+    </div>
+
+    <div class="dash-grid">
+        <!-- Score Distribution -->
+        <div class="dash-section">
+            <div class="dash-section-title">Quality Score Distribution</div>
+            <div class="chart-container">
+                <canvas id="scoreChart"></canvas>
+            </div>
+            <div class="score-dist-legend">
+                <span class="legend-dot" style="background:#27ae60"></span> High (&ge;80): {{ high_count }}
+                <span class="legend-dot" style="background:#f39c12;margin-left:1rem"></span> Medium (60–79): {{ medium_count }}
+                <span class="legend-dot" style="background:#e74c3c;margin-left:1rem"></span> Low (&lt;60): {{ low_count }}
+            </div>
+        </div>
+
+        <!-- Scenario Feedback -->
+        <div class="dash-section">
+            <div class="dash-section-title">Scenario Feedback Summary</div>
+            {% if total_scenarios > 0 %}
+            <div class="chart-container">
+                <canvas id="feedbackChart"></canvas>
+            </div>
+            <div class="score-dist-legend">
+                <span class="legend-dot" style="background:#27ae60"></span> Useful: {{ useful_count }}
+                <span class="legend-dot" style="background:#e74c3c;margin-left:1rem"></span> Not Useful: {{ not_useful_count }}
+                <span class="legend-dot" style="background:#bdc3c7;margin-left:1rem"></span> Unrated: {{ total_scenarios|add:"-"|add:useful_count|add:"-"|add:not_useful_count }}
+            </div>
+            {% else %}
+            <p class="dash-empty">No scenarios generated yet.</p>
+            {% endif %}
+        </div>
+
+        <!-- Top Gap Types -->
+        <div class="dash-section">
+            <div class="dash-section-title">Most Common Requirement Issues</div>
+            {% if top_gaps %}
+            <table class="dash-table">
+                <thead><tr><th>Issue Type</th><th>Count</th></tr></thead>
+                <tbody>
+                {% for g in top_gaps %}
+                <tr>
+                    <td>{{ g.issue_type }}</td>
+                    <td><strong>{{ g.count }}</strong></td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="dash-empty">No gap data yet.</p>
+            {% endif %}
+        </div>
+
+        <!-- Recent Sessions -->
+        <div class="dash-section">
+            <div class="dash-section-title">Recent Sessions</div>
+            {% if recent %}
+            <table class="dash-table">
+                <thead><tr><th>Title</th><th>Score</th><th>Date</th></tr></thead>
+                <tbody>
+                {% for s in recent %}
+                <tr>
+                    <td><a href="{% url 'workspace' %}" class="dash-link">{{ s.title|truncatechars:32 }}</a></td>
+                    <td>
+                        <span class="dash-score-badge score-{{ s.get_score_color }}">{{ s.accuracy_score }}%</span>
+                    </td>
+                    <td class="text-muted">{{ s.created_at|date:"d M Y" }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="dash-empty">No sessions yet. <a href="{% url 'workspace' %}">Start analyzing</a></p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+// Score distribution doughnut
+const scoreCtx = document.getElementById('scoreChart');
+if (scoreCtx) {
+    new Chart(scoreCtx, {
+        type: 'doughnut',
+        data: {
+            labels: ['High (≥80)', 'Medium (60–79)', 'Low (<60)'],
+            datasets: [{
+                data: [{{ high_count }}, {{ medium_count }}, {{ low_count }}],
+                backgroundColor: ['#27ae60', '#f39c12', '#e74c3c'],
+                borderWidth: 2,
+                borderColor: '#fff',
+            }]
+        },
+        options: {
+            cutout: '65%',
+            plugins: { legend: { display: false } },
+        }
+    });
+}
+
+// Feedback doughnut
+const fbCtx = document.getElementById('feedbackChart');
+if (fbCtx) {
+    const unrated = {{ total_scenarios }} - {{ useful_count }} - {{ not_useful_count }};
+    new Chart(fbCtx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Useful', 'Not Useful', 'Unrated'],
+            datasets: [{
+                data: [{{ useful_count }}, {{ not_useful_count }}, unrated],
+                backgroundColor: ['#27ae60', '#e74c3c', '#bdc3c7'],
+                borderWidth: 2,
+                borderColor: '#fff',
+            }]
+        },
+        options: {
+            cutout: '65%',
+            plugins: { legend: { display: false } },
+        }
+    });
+}
+</script>
+{% endblock %}

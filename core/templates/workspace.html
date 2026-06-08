@@ -1,0 +1,383 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Workspace — Test Scenario Generator{% endblock %}
+
+{% block extra_css %}
+<style>
+/* ── Workspace collaboration bar ── */
+.collab-bar {
+    background: #1a252f;
+    border-bottom: 2px solid #2ecc71;
+    padding: 0.45rem 1.2rem;
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    font-size: 0.82rem;
+    color: #ecf0f1;
+    flex-wrap: wrap;
+}
+.collab-bar .ws-name { font-weight: 600; color: #2ecc71; }
+.ws-id-badge {
+    background: #2c3e50;
+    border: 1px solid #3d5166;
+    border-radius: 4px;
+    padding: 0.1rem 0.5rem;
+    font-family: monospace;
+    font-size: 0.8rem;
+    color: #95a5a6;
+}
+.ws-members { color: #bdc3c7; }
+.btn-share-ws {
+    margin-left: auto;
+    background: #27ae60;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    padding: 0.3rem 0.8rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+    font-weight: 600;
+}
+.btn-share-ws:hover { background: #2ecc71; }
+.btn-refresh-ws {
+    background: #2c3e50;
+    color: #bdc3c7;
+    border: 1px solid #3d5166;
+    border-radius: 5px;
+    padding: 0.3rem 0.7rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+.btn-refresh-ws:hover { background: #3d5166; color: white; }
+
+/* Join notification banner */
+.join-banner {
+    background: #d4edda;
+    color: #155724;
+    text-align: center;
+    padding: 0.4rem 1rem;
+    font-size: 0.83rem;
+    border-bottom: 1px solid #c3e6cb;
+}
+
+/* ── Create workspace button in sidebar ── */
+.btn-create-workspace {
+    width: 100%;
+    background: transparent;
+    border: 1px dashed #3d5166;
+    color: #95a5a6;
+    border-radius: 6px;
+    padding: 0.45rem 0.7rem;
+    font-size: 0.78rem;
+    cursor: pointer;
+    text-align: left;
+    margin-top: 0.4rem;
+    transition: all 0.15s;
+}
+.btn-create-workspace:hover {
+    border-color: #2ecc71;
+    color: #2ecc71;
+    background: rgba(46,204,113,0.05);
+}
+
+/* ── Edit hint label in section headers ── */
+.edit-hint {
+    font-size: 0.72rem;
+    color: #5d6d7e;
+    font-weight: normal;
+    margin-left: auto;
+    padding-left: 0.5rem;
+    font-style: italic;
+}
+
+/* ── Editable cells ── */
+.editable-item {
+    cursor: text;
+    border-radius: 3px;
+    outline: 1px dashed transparent;
+    transition: background 0.15s;
+}
+.editable-item:hover { outline: 1px dashed #95a5a6; background: rgba(255,255,255,0.04); }
+.editable-item:focus { outline: 2px solid #3498db; background: rgba(52,152,219,0.06); }
+.editable-item.save-flash { background: rgba(39,174,96,0.18) !important; }
+
+/* ── Per-row save button ── */
+.btn-save-row {
+    background: transparent;
+    border: 1px solid #3d5166;
+    border-radius: 4px;
+    color: #95a5a6;
+    font-size: 0.78rem;
+    padding: 0.2rem 0.45rem;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.btn-save-row:hover { border-color: #27ae60; color: #27ae60; background: rgba(39,174,96,0.08); }
+.btn-save-row:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Team Notes section ── */
+.team-notes-area {
+    width: 100%;
+    background: #1e2b38;
+    border: 1px solid #3d5166;
+    border-radius: 6px;
+    color: #ecf0f1;
+    font-size: 0.84rem;
+    padding: 0.6rem 0.8rem;
+    resize: vertical;
+    font-family: inherit;
+    box-sizing: border-box;
+    line-height: 1.5;
+}
+.team-notes-area:focus { outline: 2px solid #3498db; border-color: #3498db; }
+.team-notes-area::placeholder { color: #5d6d7e; }
+.notes-save-hint { font-size: 0.75rem; color: #5d6d7e; margin-top: 0.3rem; }
+
+/* ── My Team Workspaces list ── */
+.ws-list { list-style: none; margin: 0 0 0.6rem; padding: 0 0.4rem; }
+.ws-list-item a {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.5rem;
+    border-radius: 6px;
+    text-decoration: none;
+    color: #bdc3c7;
+    font-size: 0.82rem;
+}
+.ws-list-item a:hover { background: rgba(52,152,219,0.10); color: #ecf0f1; }
+.ws-list-item.active a { background: rgba(52,152,219,0.18); color: #fff; }
+.ws-list-icon { font-size: 0.9rem; }
+.ws-list-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-list-badge { font-size: 0.68rem; color: #7f8c8d; font-family: monospace; }
+</style>
+{% endblock %}
+
+{% block body %}
+<nav class="navbar">
+    <div class="navbar-brand">
+        <span class="brand-icon">⚙</span>
+        Automated Requirements Analysis and Test Scenario Generation
+    </div>
+    <ul class="navbar-links">
+        <li><a href="{% url 'home' %}">Home</a></li>
+        <li><a href="{% url 'about' %}">About Us</a></li>
+        <li><a href="{% url 'dashboard' %}">Dashboard</a></li>
+        <li><a href="{% url 'logout' %}" class="btn btn-outline">Sign Out</a></li>
+    </ul>
+</nav>
+
+{% if just_joined %}
+<div class="join-banner">
+    &#127881; You joined <strong>{{ workspace.name }}</strong>. Everyone in this workspace shares the same sessions.
+</div>
+{% endif %}
+
+{% if workspace %}
+<div class="collab-bar">
+    <span>&#127962;</span>
+    <span class="ws-name">{{ workspace.name }}</span>
+    <span class="ws-id-badge">{{ workspace.workspace_id }}</span>
+    <span class="ws-members">&#128101; {{ members|length }} member{{ members|length|pluralize }}:
+        {% for m in members %}{{ m.user.username }}{% if not forloop.last %}, {% endif %}{% endfor %}
+    </span>
+    <button class="btn-refresh-ws" onclick="window.location.reload()">&#8635; Refresh</button>
+    <button class="btn-share-ws" id="shareWorkspaceBtn"
+            data-url="/workspace/{{ workspace.workspace_id }}/">
+        &#128279; Share Workspace
+    </button>
+</div>
+{% endif %}
+
+<!-- Hidden context inputs for JS -->
+<input type="hidden" id="csrfToken" value="{{ csrf_token }}">
+<input type="hidden" id="workspaceId" value="{{ workspace.workspace_id|default:'' }}">
+
+<div class="workspace-layout">
+    <!-- ─── Sidebar ─── -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <button class="btn-icon" id="toggleSidebar" title="Toggle Sidebar">☰</button>
+            <button class="btn-icon" id="newSession" title="New Session">⊕</button>
+        </div>
+        <div class="sidebar-search">
+            <input type="text" id="historySearch" placeholder="Search">
+            <span>🔍</span>
+        </div>
+        <div class="sidebar-section-label">
+            {% if workspace %}Shared History{% else %}History{% endif %}
+        </div>
+        <ul class="history-list" id="historyList">
+            {% for session in history %}
+            <li class="history-item {% if session.is_pinned %}pinned{% endif %}"
+                data-session-id="{{ session.id }}"
+                data-pinned="{{ session.is_pinned|yesno:'true,false' }}">
+                <span class="history-title">
+                    {% if session.is_pinned %}<span class="pin-indicator">&#128204;</span>{% endif %}{{ session.title|truncatechars:24 }}
+                </span>
+                <div class="history-item-right">
+                    <span class="history-score score-{{ session.get_score_color }}">{{ session.accuracy_score }}%</span>
+                    <div class="item-menu">
+                        <button class="btn-item-menu" title="Options">&#8943;</button>
+                        <div class="item-menu-dropdown">
+                            <button class="menu-option btn-pin-item">
+                                &#128204;&nbsp; {% if session.is_pinned %}Unpin{% else %}Pin{% endif %}
+                            </button>
+                            <button class="menu-option btn-rename-item">&#9998;&nbsp; Rename</button>
+                            <button class="menu-option btn-delete-item">&#128465;&nbsp; Delete</button>
+                        </div>
+                    </div>
+                </div>
+            </li>
+            {% empty %}
+            <li class="history-empty" id="historyEmpty">No history yet.</li>
+            {% endfor %}
+        </ul>
+
+        {% if my_workspaces %}
+        <div class="sidebar-section-label">My Team Workspaces</div>
+        <ul class="ws-list">
+            {% for ws in my_workspaces %}
+            <li class="ws-list-item {% if workspace and ws.id == workspace.id %}active{% endif %}">
+                <a href="{% url 'shared_workspace' ws.workspace_id %}">
+                    <span class="ws-list-icon">&#127962;</span>
+                    <span class="ws-list-name">{{ ws.name|truncatechars:20 }}</span>
+                    <span class="ws-list-badge">{{ ws.workspace_id }}</span>
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+
+        {% if not workspace %}
+        <div style="padding: 0 0.6rem;">
+            <button class="btn-create-workspace" id="createWorkspaceBtn">
+                &#128101; Create Team Workspace
+            </button>
+        </div>
+        {% endif %}
+
+        <div class="sidebar-user">
+            <span class="user-avatar">👤</span>
+            <span class="user-name">{{ user.username }}</span>
+        </div>
+    </aside>
+
+    <!-- ─── Main chat area ─── -->
+    <main class="chat-area">
+        <div class="chat-messages" id="chatMessages">
+            <div class="welcome-message" id="welcomeMsg">
+                <span class="brand-icon-large">⚙</span>
+                {% if workspace %}
+                <p>Team workspace <strong>{{ workspace.name }}</strong> is ready. Submit a requirement to generate test scenarios.</p>
+                {% else %}
+                <p>Hey! Write me a requirements for create Test Scenarios.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Input bar -->
+        <div class="chat-input-bar">
+            <textarea
+                id="requirementsInput"
+                placeholder="e.g. The system shall allow users to log in with username and password... The system shall lock the account after 3 failed attempts..."
+                rows="3"
+            ></textarea>
+            <button id="submitBtn" class="btn-send" title="Generate">
+                ↑
+            </button>
+        </div>
+    </main>
+</div>
+
+<!-- Toast notification container -->
+<div id="toastContainer"></div>
+
+<!-- Create Workspace Modal -->
+<div id="createWorkspaceModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:1000;align-items:center;justify-content:center;">
+    <div style="background:#1e2b38;border:1px solid #3d5166;border-radius:10px;padding:1.6rem 1.8rem;width:380px;max-width:92vw;box-shadow:0 8px 32px rgba(0,0,0,0.5);">
+        <h3 style="margin:0 0 0.3rem;color:#ecf0f1;font-size:1.05rem;">&#128101; Create Team Workspace</h3>
+        <p style="margin:0 0 1rem;font-size:0.82rem;color:#7f8c8d;">Give your workspace a name. Share the link with your team after creation.</p>
+        <input type="text" id="workspaceNameInput" placeholder="e.g. QA Team Alpha"
+               maxlength="200"
+               style="width:100%;background:#2c3e50;border:1px solid #3d5166;border-radius:6px;color:#ecf0f1;padding:0.55rem 0.8rem;font-size:0.9rem;box-sizing:border-box;margin-bottom:1.1rem;outline:none;">
+        <div style="display:flex;gap:0.6rem;justify-content:flex-end;">
+            <button id="cancelCreateWs"
+                    style="background:transparent;border:1px solid #3d5166;color:#95a5a6;border-radius:6px;padding:0.45rem 1rem;cursor:pointer;font-size:0.85rem;">
+                Cancel
+            </button>
+            <button id="confirmCreateWs"
+                    style="background:#27ae60;border:none;color:white;border-radius:6px;padding:0.45rem 1.1rem;cursor:pointer;font-size:0.85rem;font-weight:600;">
+                Create Workspace
+            </button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/workspace.js' %}?v=3"></script>
+<script>
+/* Workspace create/share — inline so it is never cached */
+(function () {
+    var btn    = document.getElementById('createWorkspaceBtn');
+    var modal  = document.getElementById('createWorkspaceModal');
+    var input  = document.getElementById('workspaceNameInput');
+    var cancel = document.getElementById('cancelCreateWs');
+    var confirm_btn = document.getElementById('confirmCreateWs');
+    var csrf   = (document.getElementById('csrfToken') || {}).value || '';
+
+    if (!btn || !modal) return;
+
+    btn.onclick = function () {
+        modal.style.display = 'flex';
+        if (input) { input.value = ''; input.focus(); }
+    };
+
+    if (cancel) cancel.onclick = function () { modal.style.display = 'none'; };
+
+    modal.onclick = function (e) {
+        if (e.target === modal) modal.style.display = 'none';
+    };
+
+    function createWS() {
+        var name = (input ? input.value.trim() : '') || 'Team Workspace';
+        modal.style.display = 'none';
+        fetch('/workspace/create/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+            body: JSON.stringify({ name: name }),
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            window.location.href = '/workspace/' + d.workspace_id + '/';
+        })
+        .catch(function (err) { alert('Failed: ' + err.message); });
+    }
+
+    if (confirm_btn) confirm_btn.onclick = createWS;
+    if (input) input.onkeydown = function (e) {
+        if (e.key === 'Enter')  createWS();
+        if (e.key === 'Escape') modal.style.display = 'none';
+    };
+
+    /* Share workspace button */
+    var shareBtn = document.getElementById('shareWorkspaceBtn');
+    if (shareBtn) {
+        shareBtn.onclick = function () {
+            var url = window.location.origin + shareBtn.dataset.url;
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(url).then(function () {
+                    shareBtn.textContent = '✓ Link Copied!';
+                    setTimeout(function () { shareBtn.innerHTML = '&#128279; Share Workspace'; }, 2000);
+                });
+            } else {
+                prompt('Copy this link:', url);
+            }
+        };
+    }
+}());
+</script>
+{% endblock %}

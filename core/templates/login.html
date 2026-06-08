@@ -1,0 +1,49 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Sign In — Test Scenario Generator{% endblock %}
+
+{% block body %}
+<nav class="navbar">
+    <div class="navbar-brand">
+        <span class="brand-icon">⚙</span>
+        Automated Requirements Analysis and Test Scenario Generation
+    </div>
+    <ul class="navbar-links">
+        <li><a href="{% url 'home' %}">Home</a></li>
+        <li><a href="{% url 'about' %}">About Us</a></li>
+        <li><a href="{% url 'login' %}" class="btn btn-outline active">Sign In</a></li>
+        <li><a href="{% url 'register' %}" class="btn btn-primary">Register</a></li>
+    </ul>
+</nav>
+
+<div class="auth-page">
+    <div class="auth-card">
+        <h1>Welcome Back!</h1>
+        <p class="auth-subtitle">Login to access your project history.</p>
+
+        {% if form.errors %}
+            <div class="alert alert-error">
+                Invalid username or password. Please try again.
+            </div>
+        {% endif %}
+
+        <form method="POST" action="{% url 'login' %}">
+            {% csrf_token %}
+            <div class="form-group">
+                <label for="id_username">Email or Username</label>
+                <input type="text" id="id_username" name="username"
+                       placeholder="Value" required>
+            </div>
+            <div class="form-group">
+                <label for="id_password">Password</label>
+                <input type="password" id="id_password" name="password"
+                       placeholder="Value" required>
+            </div>
+            <button type="submit" class="btn btn-submit">Sign In</button>
+        </form>
+        <p class="auth-switch"><a href="#">Forgot password?</a></p>
+        <p class="auth-switch">Don't have an account? <a href="{% url 'register' %}">Register</a></p>
+    </div>
+</div>
+{% endblock %}
