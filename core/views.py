@@ -306,6 +306,9 @@ def analyze_view(request):
         qa_result = QAAnalyzer().analyze(requirements_text)
     except GeminiQuotaExceeded as e:
         return JsonResponse({'error': str(e)}, status=429)
+    except Exception as e:
+        # Return JSON (not an HTML 500 page) so the frontend can show a real message
+        return JsonResponse({'error': f'Analysis failed: {e}'}, status=500)
 
     session = TrainingDataManager().save_qa_session(
         user=request.user,

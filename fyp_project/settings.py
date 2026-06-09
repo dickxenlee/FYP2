@@ -12,6 +12,15 @@ DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '127.0.0.1,localhost').split(',')
 
+# Required for POST/CSRF over HTTPS (e.g. on Render). Derived from ALLOWED_HOSTS:
+# a leading-dot host like ".onrender.com" becomes the wildcard "https://*.onrender.com".
+CSRF_TRUSTED_ORIGINS = []
+for _host in ALLOWED_HOSTS:
+    _host = _host.strip()
+    if _host in ('', '127.0.0.1', 'localhost'):
+        continue
+    CSRF_TRUSTED_ORIGINS.append('https://*' + _host if _host.startswith('.') else 'https://' + _host)
+
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
