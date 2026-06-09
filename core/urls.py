@@ -14,6 +14,7 @@ urlpatterns = [
 
     # Shared workspace — must come after the more specific patterns above
     path('workspace/create/', views.create_workspace_view, name='create_workspace'),
+    path('workspace/<str:workspace_id>/state/', views.workspace_state_view, name='workspace_state'),
     path('workspace/<str:workspace_id>/', views.shared_workspace_view, name='shared_workspace'),
 
     # Analysis

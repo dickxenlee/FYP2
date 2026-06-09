@@ -443,8 +443,9 @@ function appendAnalysisResult(data) {
         html += '</div><div class="detailed-cases-container"></div></div>';
     }
 
-    // Team Notes (collaborative freeform notes)
-    if (data.session_id) {
+    // Team Notes (collaborative freeform notes) — only inside a Team Workspace,
+    // not in personal/normal chats.
+    if (data.session_id && workspaceId) {
         html += '<div class="qa-section">';
         html += '<div class="qa-section-header"><span class="section-num">&#128221;</span>Team Notes</div>';
         html += '<div style="padding:0.8rem 1rem;">';
@@ -802,18 +803,15 @@ function saveTeamNotes(sessionId, notes) {
 // ─────────────────────────────────────────────
 // History sidebar helpers
 // ─────────────────────────────────────────────
-function addSessionToHistory(data) {
-    var emptyMsg = document.getElementById('historyEmpty');
-    if (emptyMsg) emptyMsg.remove();
-    document.querySelectorAll('.history-item').forEach(function (el) { el.classList.remove('active'); });
-
+// Build one history sidebar <li>. Shared by the submit flow and live polling.
+function buildHistoryItem(sessionId, title, scoreColor, score, active) {
     var li = document.createElement('li');
-    li.className = 'history-item active';
-    li.dataset.sessionId = data.session_id;
+    li.className = 'history-item' + (active ? ' active' : '');
+    li.dataset.sessionId = sessionId;
     li.innerHTML =
-        '<span class="history-title">' + escapeHtml(getShortTitle()) + '</span>' +
+        '<span class="history-title">' + escapeHtml(title) + '</span>' +
         '<div class="history-item-right">' +
-        '<span class="history-score score-' + data.score_color + '">' + data.score + '%</span>' +
+        '<span class="history-score score-' + scoreColor + '">' + score + '%</span>' +
         '<div class="item-menu">' +
         '<button class="btn-item-menu" title="Options">&#8943;</button>' +
         '<div class="item-menu-dropdown">' +
@@ -821,6 +819,15 @@ function addSessionToHistory(data) {
         '<button class="menu-option btn-rename-item">&#9998;&nbsp; Rename</button>' +
         '<button class="menu-option btn-delete-item">&#128465;&nbsp; Delete</button>' +
         '</div></div></div>';
+    return li;
+}
+
+function addSessionToHistory(data) {
+    var emptyMsg = document.getElementById('historyEmpty');
+    if (emptyMsg) emptyMsg.remove();
+    document.querySelectorAll('.history-item').forEach(function (el) { el.classList.remove('active'); });
+
+    var li = buildHistoryItem(data.session_id, getShortTitle(), data.score_color, data.score, true);
     historyList.insertBefore(li, historyList.firstChild);
 }
 
@@ -979,4 +986,48 @@ function escapeHtml(text) {
     var div = document.createElement('div');
     div.appendChild(document.createTextNode(String(text)));
     return div.innerHTML;
+}
+
+
+// ─────────────────────────────────────────────
+// Live workspace auto-refresh (polling)
+// Only runs inside a Team Workspace. Updates the sidebar history list and the
+// member count without disturbing the open chat, the active item, or typing.
+// ─────────────────────────────────────────────
+function pollWorkspaceState() {
+    if (!workspaceId || document.hidden) return;
+
+    fetch('/workspace/' + workspaceId + '/state/')
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (data) {
+            if (!data) return;
+
+            // 1. Insert any sessions that aren't already in the sidebar.
+            if (data.sessions && data.sessions.length) {
+                var emptyMsg = document.getElementById('historyEmpty');
+                if (emptyMsg) emptyMsg.remove();
+                // Walk newest-last so insertBefore(first) keeps server order on top.
+                for (var i = data.sessions.length - 1; i >= 0; i--) {
+                    var s = data.sessions[i];
+                    if (historyList.querySelector('.history-item[data-session-id="' + s.id + '"]')) {
+                        continue; // already shown
+                    }
+                    var li = buildHistoryItem(s.id, s.title, s.color, s.score, false);
+                    historyList.insertBefore(li, historyList.firstChild);
+                }
+            }
+
+            // 2. Refresh the member list/count in the collaboration bar.
+            var membersEl = document.querySelector('.collab-bar .ws-members');
+            if (membersEl && data.members) {
+                var plural = data.member_count === 1 ? '' : 's';
+                membersEl.innerHTML = '&#128101; ' + data.member_count +
+                    ' member' + plural + ': ' + data.members.map(escapeHtml).join(', ');
+            }
+        })
+        .catch(function () { /* transient network error — ignore, try again next tick */ });
+}
+
+if (workspaceId) {
+    setInterval(pollWorkspaceState, 8000);
 }

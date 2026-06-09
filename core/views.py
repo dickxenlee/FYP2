@@ -256,6 +256,49 @@ def load_session_view(request, session_id):
 
 
 # ─────────────────────────────────────────────
+# Live workspace state (lightweight polling endpoint)
+# ─────────────────────────────────────────────
+
+@login_required
+def workspace_state_view(request, workspace_id):
+    """
+    Cheap JSON snapshot of a shared workspace for near-real-time polling:
+    the session list (for the sidebar) and the current member list.
+    Makes no LLM calls. Only accessible to members of the workspace.
+    """
+    workspace = get_object_or_404(Workspace, workspace_id=workspace_id)
+    if not WorkspaceMembership.objects.filter(
+        workspace=workspace, user=request.user
+    ).exists():
+        raise Http404()
+
+    sessions = AnalysisSession.objects.filter(
+        workspace=workspace
+    ).order_by('-is_pinned', '-created_at')
+
+    members = list(
+        WorkspaceMembership.objects.filter(workspace=workspace)
+        .select_related('user')
+        .values_list('user__username', flat=True)
+    )
+
+    return JsonResponse({
+        'sessions': [
+            {
+                'id': s.id,
+                'title': s.title,
+                'score': s.accuracy_score,
+                'color': s.get_score_color(),
+                'pinned': s.is_pinned,
+            }
+            for s in sessions
+        ],
+        'members': members,
+        'member_count': len(members),
+    })
+
+
+# ─────────────────────────────────────────────
 # Analyze requirements — Phase 3 QA redesign
 # ─────────────────────────────────────────────
 
