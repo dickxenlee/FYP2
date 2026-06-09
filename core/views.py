@@ -18,7 +18,7 @@ from .services.test_scenario_generator import TestScenarioGenerator
 from .services.qa_analyzer import QAAnalyzer
 from .services.detailed_case_generator import DetailedCaseGenerator
 from .services.training_data_manager import TrainingDataManager
-from .services.gemini_service import GeminiQuotaExceeded
+from .services.gemini_service import GeminiQuotaExceeded, GeminiUnavailable
 
 
 # ─────────────────────────────────────────────
@@ -290,6 +290,10 @@ def analyze_view(request):
             qa_result = QAAnalyzer().analyze(edited_text)
         except GeminiQuotaExceeded as e:
             return JsonResponse({'error': str(e)}, status=429)
+        except GeminiUnavailable as e:
+            return JsonResponse({'error': str(e)}, status=503)
+        except Exception as e:
+            return JsonResponse({'error': f'Analysis failed: {e}'}, status=500)
         session = TrainingDataManager().save_qa_session(
             user=request.user,
             requirements_text=edited_text,
@@ -306,6 +310,8 @@ def analyze_view(request):
         qa_result = QAAnalyzer().analyze(requirements_text)
     except GeminiQuotaExceeded as e:
         return JsonResponse({'error': str(e)}, status=429)
+    except GeminiUnavailable as e:
+        return JsonResponse({'error': str(e)}, status=503)
     except Exception as e:
         # Return JSON (not an HTML 500 page) so the frontend can show a real message
         return JsonResponse({'error': f'Analysis failed: {e}'}, status=500)
