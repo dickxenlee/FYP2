@@ -18,7 +18,7 @@ from .services.test_scenario_generator import TestScenarioGenerator
 from .services.qa_analyzer import QAAnalyzer
 from .services.detailed_case_generator import DetailedCaseGenerator
 from .services.training_data_manager import TrainingDataManager
-from .services.gemini_service import GeminiQuotaExceeded, GeminiUnavailable
+from .services.gemini_service import GeminiQuotaExceeded
 
 
 # ─────────────────────────────────────────────
@@ -290,10 +290,6 @@ def analyze_view(request):
             qa_result = QAAnalyzer().analyze(edited_text)
         except GeminiQuotaExceeded as e:
             return JsonResponse({'error': str(e)}, status=429)
-        except GeminiUnavailable as e:
-            return JsonResponse({'error': str(e)}, status=503)
-        except Exception as e:
-            return JsonResponse({'error': f'Analysis failed: {e}'}, status=500)
         session = TrainingDataManager().save_qa_session(
             user=request.user,
             requirements_text=edited_text,
@@ -310,11 +306,6 @@ def analyze_view(request):
         qa_result = QAAnalyzer().analyze(requirements_text)
     except GeminiQuotaExceeded as e:
         return JsonResponse({'error': str(e)}, status=429)
-    except GeminiUnavailable as e:
-        return JsonResponse({'error': str(e)}, status=503)
-    except Exception as e:
-        # Return JSON (not an HTML 500 page) so the frontend can show a real message
-        return JsonResponse({'error': f'Analysis failed: {e}'}, status=500)
 
     session = TrainingDataManager().save_qa_session(
         user=request.user,
@@ -372,10 +363,6 @@ def generate_detailed_cases_view(request):
         detailed_cases = DetailedCaseGenerator().generate(scenarios)
     except GeminiQuotaExceeded as e:
         return JsonResponse({'error': str(e)}, status=429)
-    except GeminiUnavailable as e:
-        return JsonResponse({'error': str(e)}, status=503)
-    except Exception as e:
-        return JsonResponse({'error': f'Generation failed: {e}'}, status=500)
     TrainingDataManager().save_detailed_cases(session_id, detailed_cases)
 
     return JsonResponse({'session_id': session_id, 'detailed_cases': detailed_cases})
@@ -496,14 +483,7 @@ def confirm_view(request):
     session = _get_accessible_session(session_id, request.user)
 
     text_to_use = session.suggested_requirement if decision == 'yes' else session.requirements_text
-    try:
-        scenarios = TestScenarioGenerator().generate_scenarios(text_to_use)
-    except GeminiQuotaExceeded as e:
-        return JsonResponse({'error': str(e)}, status=429)
-    except GeminiUnavailable as e:
-        return JsonResponse({'error': str(e)}, status=503)
-    except Exception as e:
-        return JsonResponse({'error': f'Generation failed: {e}'}, status=500)
+    scenarios = TestScenarioGenerator().generate_scenarios(text_to_use)
     TrainingDataManager().add_scenarios_to_session(session_id, scenarios)
 
     return JsonResponse({'session_id': session.id, 'scenarios': scenarios, 'requires_user_decision': False})
@@ -700,10 +680,6 @@ def reanalyze_view(request):
         qa_result = QAAnalyzer().analyze(session.requirements_text)
     except GeminiQuotaExceeded as e:
         return JsonResponse({'error': str(e)}, status=429)
-    except GeminiUnavailable as e:
-        return JsonResponse({'error': str(e)}, status=503)
-    except Exception as e:
-        return JsonResponse({'error': f'Analysis failed: {e}'}, status=500)
 
     TrainingDataManager().reanalyze_session(session, qa_result)
 
