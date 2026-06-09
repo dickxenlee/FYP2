@@ -1013,7 +1013,17 @@ function pollWorkspaceState() {
                         continue; // already shown
                     }
                     var li = buildHistoryItem(s.id, s.title, s.color, s.score, false);
-                    historyList.insertBefore(li, historyList.firstChild);
+                    if (s.pinned) {
+                        li.dataset.pinned = 'true';
+                        li.classList.add('pinned');
+                        historyList.insertBefore(li, historyList.firstChild);
+                    } else {
+                        // Keep sidebar order (-is_pinned, -created_at): a new
+                        // unpinned session goes below pinned items, not above them.
+                        var lastPinned = getLastPinnedItem();
+                        if (lastPinned) lastPinned.after(li);
+                        else historyList.insertBefore(li, historyList.firstChild);
+                    }
                 }
             }
 
