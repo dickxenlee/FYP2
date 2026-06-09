@@ -372,6 +372,10 @@ def generate_detailed_cases_view(request):
         detailed_cases = DetailedCaseGenerator().generate(scenarios)
     except GeminiQuotaExceeded as e:
         return JsonResponse({'error': str(e)}, status=429)
+    except GeminiUnavailable as e:
+        return JsonResponse({'error': str(e)}, status=503)
+    except Exception as e:
+        return JsonResponse({'error': f'Generation failed: {e}'}, status=500)
     TrainingDataManager().save_detailed_cases(session_id, detailed_cases)
 
     return JsonResponse({'session_id': session_id, 'detailed_cases': detailed_cases})
@@ -492,7 +496,14 @@ def confirm_view(request):
     session = _get_accessible_session(session_id, request.user)
 
     text_to_use = session.suggested_requirement if decision == 'yes' else session.requirements_text
-    scenarios = TestScenarioGenerator().generate_scenarios(text_to_use)
+    try:
+        scenarios = TestScenarioGenerator().generate_scenarios(text_to_use)
+    except GeminiQuotaExceeded as e:
+        return JsonResponse({'error': str(e)}, status=429)
+    except GeminiUnavailable as e:
+        return JsonResponse({'error': str(e)}, status=503)
+    except Exception as e:
+        return JsonResponse({'error': f'Generation failed: {e}'}, status=500)
     TrainingDataManager().add_scenarios_to_session(session_id, scenarios)
 
     return JsonResponse({'session_id': session.id, 'scenarios': scenarios, 'requires_user_decision': False})
@@ -689,6 +700,10 @@ def reanalyze_view(request):
         qa_result = QAAnalyzer().analyze(session.requirements_text)
     except GeminiQuotaExceeded as e:
         return JsonResponse({'error': str(e)}, status=429)
+    except GeminiUnavailable as e:
+        return JsonResponse({'error': str(e)}, status=503)
+    except Exception as e:
+        return JsonResponse({'error': f'Analysis failed: {e}'}, status=500)
 
     TrainingDataManager().reanalyze_session(session, qa_result)
 
