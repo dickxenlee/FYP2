@@ -1,10 +1,11 @@
+import os
 import time
 import google.generativeai as genai
 from django.conf import settings
 
 
 class GeminiQuotaExceeded(Exception):
-    """Raised when the Gemini API daily quota is exhausted."""
+    """Raised when the Gemini API request limit (per-minute or per-day) is hit."""
     pass
 
 
@@ -16,17 +17,20 @@ class GeminiUnavailable(Exception):
 class GeminiService:
     """
     Wraps the Google Gemini API.
-    Uses gemini-2.0-flash: good free-tier limits and far more available than
-    gemini-2.5-flash, which frequently returns 503 'high demand'.
+
+    Model is configurable via the GEMINI_MODEL env var. Default is
+    gemini-2.5-flash-lite, which has the highest free-tier daily limit
+    (~1,000 requests/day vs ~200/day for gemini-2.0-flash).
     """
 
-    # Per-request timeout (seconds). Kept well under gunicorn's --timeout so the
+    # Per-request timeout (seconds). Kept well under gunicorn's timeout so the
     # web worker returns a real response instead of being SIGKILLed mid-retry.
     REQUEST_TIMEOUT = 45
 
     def __init__(self):
         genai.configure(api_key=settings.GEMINI_API_KEY)
-        self.model = genai.GenerativeModel('gemini-2.0-flash')
+        model_name = os.environ.get('GEMINI_MODEL', 'gemini-2.5-flash-lite')
+        self.model = genai.GenerativeModel(model_name)
 
     def fetch_response(self, prompt: str) -> str:
         """
@@ -48,11 +52,20 @@ class GeminiService:
             except Exception as e:
                 error_str = str(e).lower()
 
-                # Quota exhausted — no point retrying, surface immediately
+                # Rate / quota limit. A 429 is often the PER-MINUTE limit (resets
+                # in ~60s), not the daily cap — so retry once after a short wait
+                # before giving up, and word the message accordingly.
                 if any(kw in error_str for kw in ('quota', 'resourceexhausted', '429', 'rate limit')):
+                    if attempt < max_retries - 1:
+                        time.sleep(5)
+                        continue
                     raise GeminiQuotaExceeded(
-                        "Daily API quota exceeded. Please try again tomorrow "
-                        "or upgrade your Gemini API plan at aistudio.google.com."
+                        "Gemini API limit reached. This is usually the per-minute "
+                        "rate limit — wait about a minute and try again. If it "
+                        "keeps happening you've hit the daily free quota, which "
+                        "resets at midnight Pacific time. To raise the limit, use a "
+                        "key from another Google account or enable billing at "
+                        "aistudio.google.com."
                     )
 
                 # Model overloaded (503) — retry once quickly, then fail fast
