@@ -32,6 +32,7 @@ urlpatterns = [
     # Collaborative output editing
     path('update_output_field/', views.update_output_field_view, name='update_output_field'),
     path('update_team_notes/', views.update_team_notes_view, name='update_team_notes'),
+    path('session/<int:session_id>/notes/', views.session_notes_view, name='session_notes'),
 
     # Session management
     path('delete_history/', views.delete_history_view, name='delete_history'),

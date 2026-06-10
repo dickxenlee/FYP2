@@ -1084,9 +1084,30 @@ function pollMyWorkspaces() {
         .catch(function () { /* transient network error — ignore, retry next tick */ });
 }
 
+// Live-refresh the open session's team notes so a teammate's edits appear
+// without a reload. Skips while you are typing in the box (so it never
+// overwrites your own unsaved text).
+function pollTeamNotes() {
+    if (!workspaceId || !currentSessionId || document.hidden) return;
+    var area = document.querySelector('.team-notes-area[data-session-id="' + currentSessionId + '"]');
+    if (!area || area === document.activeElement) return;
+
+    fetch('/session/' + currentSessionId + '/notes/')
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (data) {
+            if (!data) return;
+            var incoming = data.team_notes || '';
+            if (incoming !== area.value && area !== document.activeElement) {
+                area.value = incoming;
+            }
+        })
+        .catch(function () { /* transient error — try again next tick */ });
+}
+
 function pollAll() {
     pollWorkspaceState();   // self-guards: returns early outside a workspace
     pollMyWorkspaces();
+    pollTeamNotes();        // self-guards: only in a workspace with an open session
 }
 
 setInterval(pollAll, 8000);

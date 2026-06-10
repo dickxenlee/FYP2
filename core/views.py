@@ -669,6 +669,13 @@ def update_team_notes_view(request):
     return JsonResponse({'status': 'ok'})
 
 
+@login_required
+def session_notes_view(request, session_id):
+    """Lightweight read of a session's team notes, for live polling."""
+    session = _get_accessible_session(session_id, request.user)
+    return JsonResponse({'team_notes': session.team_notes})
+
+
 # ─────────────────────────────────────────────
 # Delete all history
 # ─────────────────────────────────────────────
