@@ -3,18 +3,18 @@ import json
 
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth import login, logout
+from django.contrib.auth.models import User
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, HttpResponse, Http404
 from django.views.decorators.http import require_POST
-from django.db.models import Avg, Count
+from django.db.models import Count
 
 from .forms import RegisterForm, LoginForm
 from .models import (
     AnalysisSession, RequirementGap, TestScenario,
-    FeedbackItem, TestCondition,
+    FeedbackItem, TestCondition, DetailedTestCase,
     Workspace, WorkspaceMembership,
 )
-from .services.test_scenario_generator import TestScenarioGenerator
 from .services.qa_analyzer import QAAnalyzer
 from .services.detailed_case_generator import DetailedCaseGenerator
 from .services.training_data_manager import TrainingDataManager
@@ -45,7 +45,7 @@ def register_view(request):
         form = RegisterForm(request.POST)
         if form.is_valid():
             user = form.save()
-            login(request, user)
+            login(request, user, backend='django.contrib.auth.backends.ModelBackend')
             return redirect('workspace')
     else:
         form = RegisterForm()
@@ -79,10 +79,11 @@ def logout_view(request):
 # ─────────────────────────────────────────────
 
 def _my_workspaces(user):
-    """Team workspaces this user belongs to, newest first."""
-    return Workspace.objects.filter(
-        memberships__user=user
-    ).distinct().order_by('-created_at')
+    """Team workspaces this user belongs to, newest first, with member counts."""
+    ws_ids = WorkspaceMembership.objects.filter(user=user).values_list('workspace_id', flat=True)
+    return Workspace.objects.filter(id__in=ws_ids).annotate(
+        member_count=Count('memberships', distinct=True)
+    ).order_by('-created_at')
 
 
 @login_required
@@ -93,6 +94,7 @@ def workspace_view(request):
     return render(request, 'workspace.html', {
         'history': history,
         'my_workspaces': _my_workspaces(request.user),
+        'can_delete_chats': True,  # personal chats are always the user's own
     })
 
 
@@ -124,6 +126,8 @@ def shared_workspace_view(request, workspace_id):
         'members': members,
         'just_joined': just_joined,
         'my_workspaces': _my_workspaces(request.user),
+        'can_delete_chats': workspace.owner == request.user,
+        'is_owner': workspace.owner == request.user,
     })
 
 
@@ -144,6 +148,157 @@ def create_workspace_view(request):
     WorkspaceMembership.objects.create(workspace=workspace, user=request.user, role='owner')
 
     return JsonResponse({'workspace_id': workspace.workspace_id, 'name': workspace.name})
+
+
+# ─────────────────────────────────────────────
+# Rename a workspace (owner only)
+# ─────────────────────────────────────────────
+
+@login_required
+@require_POST
+def rename_workspace_view(request):
+    try:
+        body = json.loads(request.body)
+        workspace_id = body.get('workspace_id', '').strip()
+        name = body.get('name', '').strip()
+    except (json.JSONDecodeError, AttributeError):
+        return JsonResponse({'error': 'Invalid request body.'}, status=400)
+
+    if not workspace_id or not name:
+        return JsonResponse({'error': 'workspace_id and name are required.'}, status=400)
+
+    workspace = get_object_or_404(Workspace, workspace_id=workspace_id)
+    if workspace.owner != request.user:
+        return JsonResponse({'error': 'Only the workspace owner can rename it.'}, status=403)
+
+    workspace.name = name[:200]
+    workspace.save(update_fields=['name'])
+    return JsonResponse({'status': 'ok', 'name': workspace.name})
+
+
+# ─────────────────────────────────────────────
+# Leave / quit a workspace (any member)
+# ─────────────────────────────────────────────
+
+@login_required
+@require_POST
+def leave_workspace_view(request):
+    try:
+        body = json.loads(request.body)
+        workspace_id = body.get('workspace_id', '').strip()
+    except (json.JSONDecodeError, AttributeError):
+        return JsonResponse({'error': 'Invalid request body.'}, status=400)
+
+    if not workspace_id:
+        return JsonResponse({'error': 'workspace_id is required.'}, status=400)
+
+    workspace = get_object_or_404(Workspace, workspace_id=workspace_id)
+    WorkspaceMembership.objects.filter(workspace=workspace, user=request.user).delete()
+    return JsonResponse({'status': 'left'})
+
+
+# ─────────────────────────────────────────────
+# Add a member by username (owner only)
+# ─────────────────────────────────────────────
+
+@login_required
+@require_POST
+def add_member_view(request):
+    try:
+        body = json.loads(request.body)
+        workspace_id = body.get('workspace_id', '').strip()
+        username = body.get('username', '').strip()
+    except (json.JSONDecodeError, AttributeError):
+        return JsonResponse({'error': 'Invalid request body.'}, status=400)
+
+    if not workspace_id or not username:
+        return JsonResponse({'error': 'workspace_id and username are required.'}, status=400)
+
+    workspace = get_object_or_404(Workspace, workspace_id=workspace_id)
+    if workspace.owner != request.user:
+        return JsonResponse({'error': 'Only the workspace owner can add members.'}, status=403)
+
+    try:
+        user = User.objects.get(username__iexact=username)
+    except User.DoesNotExist:
+        return JsonResponse({'error': 'No user named "%s".' % username}, status=404)
+
+    _, created = WorkspaceMembership.objects.get_or_create(
+        workspace=workspace, user=user, defaults={'role': 'member'}
+    )
+    if not created:
+        return JsonResponse({'error': '%s is already a member.' % user.username}, status=400)
+
+    return JsonResponse({
+        'status': 'added',
+        'username': user.username,
+        'member_count': WorkspaceMembership.objects.filter(workspace=workspace).count(),
+    })
+
+
+# ─────────────────────────────────────────────
+# Remove a member (owner only)
+# ─────────────────────────────────────────────
+
+@login_required
+@require_POST
+def remove_member_view(request):
+    try:
+        body = json.loads(request.body)
+        workspace_id = body.get('workspace_id', '').strip()
+        username = body.get('username', '').strip()
+    except (json.JSONDecodeError, AttributeError):
+        return JsonResponse({'error': 'Invalid request body.'}, status=400)
+
+    if not workspace_id or not username:
+        return JsonResponse({'error': 'workspace_id and username are required.'}, status=400)
+
+    workspace = get_object_or_404(Workspace, workspace_id=workspace_id)
+    if workspace.owner != request.user:
+        return JsonResponse({'error': 'Only the workspace owner can remove members.'}, status=403)
+    if username.lower() == workspace.owner.username.lower():
+        return JsonResponse({'error': 'The owner cannot be removed.'}, status=400)
+
+    deleted, _ = WorkspaceMembership.objects.filter(
+        workspace=workspace, user__username__iexact=username
+    ).delete()
+    if not deleted:
+        return JsonResponse({'error': '%s is not a member.' % username}, status=404)
+
+    return JsonResponse({
+        'status': 'removed',
+        'username': username,
+        'member_count': WorkspaceMembership.objects.filter(workspace=workspace).count(),
+    })
+
+
+# ─────────────────────────────────────────────
+# Delete a whole workspace + all its chats (owner only)
+# ─────────────────────────────────────────────
+
+@login_required
+@require_POST
+def delete_workspace_view(request):
+    try:
+        body = json.loads(request.body)
+        workspace_id = body.get('workspace_id', '').strip()
+    except (json.JSONDecodeError, AttributeError):
+        return JsonResponse({'error': 'Invalid request body.'}, status=400)
+
+    if not workspace_id:
+        return JsonResponse({'error': 'workspace_id is required.'}, status=400)
+
+    workspace = get_object_or_404(Workspace, workspace_id=workspace_id)
+    if workspace.owner != request.user:
+        return JsonResponse({'error': 'Only the workspace owner can delete the workspace.'}, status=403)
+
+    # Sessions use SET_NULL, so remove them explicitly for a complete deletion;
+    # this cascades to their scenarios/conditions/gaps/feedback. Memberships
+    # cascade automatically when the workspace is deleted.
+    AnalysisSession.objects.filter(workspace=workspace).delete()
+    workspace.delete()
+
+    return JsonResponse({'status': 'deleted'})
 
 
 # ─────────────────────────────────────────────
@@ -295,7 +450,17 @@ def workspace_state_view(request, workspace_id):
         ],
         'members': members,
         'member_count': len(members),
+        'owner': workspace.owner.username,
     })
+
+
+@login_required
+def my_workspaces_state_view(request):
+    """Cheap JSON snapshot of the user's team workspaces for live sidebar refresh."""
+    return JsonResponse({'workspaces': [
+        {'workspace_id': w.workspace_id, 'name': w.name, 'member_count': w.member_count}
+        for w in _my_workspaces(request.user)
+    ]})
 
 
 # ─────────────────────────────────────────────
@@ -505,34 +670,6 @@ def update_team_notes_view(request):
 
 
 # ─────────────────────────────────────────────
-# STATE 2: Confirm user decision — legacy, kept for backward compat
-# ─────────────────────────────────────────────
-
-@login_required
-@require_POST
-def confirm_view(request):
-    try:
-        body = json.loads(request.body)
-        session_id = body.get('session_id')
-        decision = body.get('decision', '').lower()
-    except (json.JSONDecodeError, AttributeError):
-        return JsonResponse({'error': 'Invalid request body.'}, status=400)
-
-    if not session_id or decision not in ('yes', 'no'):
-        return JsonResponse(
-            {'error': 'session_id and decision (yes or no) are required.'}, status=400
-        )
-
-    session = _get_accessible_session(session_id, request.user)
-
-    text_to_use = session.suggested_requirement if decision == 'yes' else session.requirements_text
-    scenarios = TestScenarioGenerator().generate_scenarios(text_to_use)
-    TrainingDataManager().add_scenarios_to_session(session_id, scenarios)
-
-    return JsonResponse({'session_id': session.id, 'scenarios': scenarios, 'requires_user_decision': False})
-
-
-# ─────────────────────────────────────────────
 # Delete all history
 # ─────────────────────────────────────────────
 
@@ -624,52 +761,16 @@ def delete_current_chat_view(request):
         return JsonResponse({'error': 'session_id is required.'}, status=400)
 
     session = _get_accessible_session(session_id, request.user)
+
+    # Team (workspace) chats can only be deleted by the workspace owner.
+    if session.workspace and session.workspace.owner != request.user:
+        return JsonResponse(
+            {'error': 'Only the workspace owner can delete team chats.'}, status=403
+        )
+
     session.delete()
 
     return JsonResponse({'system_action': 'chat_deleted', 'session_id': session_id})
-
-
-# ─────────────────────────────────────────────
-# Dashboard — analytics overview
-# ─────────────────────────────────────────────
-
-@login_required
-def dashboard_view(request):
-    sessions = AnalysisSession.objects.filter(user=request.user)
-    total = sessions.count()
-
-    avg_score    = round(sessions.aggregate(avg=Avg('accuracy_score'))['avg'] or 0, 1)
-    high_count   = sessions.filter(accuracy_score__gte=80).count()
-    medium_count = sessions.filter(accuracy_score__gte=60, accuracy_score__lt=80).count()
-    low_count    = sessions.filter(accuracy_score__lt=60).count()
-
-    all_scenarios    = TestScenario.objects.filter(session__user=request.user)
-    total_scenarios  = all_scenarios.count()
-    useful_count     = all_scenarios.filter(user_rating='useful').count()
-    not_useful_count = all_scenarios.filter(user_rating='not_useful').count()
-
-    top_gaps = (
-        RequirementGap.objects
-        .filter(session__user=request.user)
-        .values('issue_type')
-        .annotate(count=Count('id'))
-        .order_by('-count')[:5]
-    )
-
-    recent = sessions.order_by('-created_at')[:6]
-
-    return render(request, 'dashboard.html', {
-        'total': total,
-        'avg_score': avg_score,
-        'high_count': high_count,
-        'medium_count': medium_count,
-        'low_count': low_count,
-        'total_scenarios': total_scenarios,
-        'useful_count': useful_count,
-        'not_useful_count': not_useful_count,
-        'top_gaps': top_gaps,
-        'recent': recent,
-    })
 
 
 # ─────────────────────────────────────────────
@@ -735,29 +836,141 @@ def reanalyze_view(request):
 
 
 # ─────────────────────────────────────────────
-# Export — CSV
+# Export helpers — collect the full QA report once for all formats
+# ─────────────────────────────────────────────
+
+_ANALYSIS_FIELDS = [
+    ('Actors', 'actors'),
+    ('Actions', 'actions'),
+    ('Business Rules', 'business_rules'),
+    ('Constraints', 'constraints'),
+    ('Validation Rules', 'validation_rules'),
+    ('Error Handling', 'error_handling'),
+    ('Non-Functional', 'non_functional'),
+]
+
+
+def _scenario_detailed_case(scenario):
+    try:
+        return scenario.detailed_case
+    except DetailedTestCase.DoesNotExist:
+        return None
+
+
+def _collect_export_data(session):
+    info = session.get_extracted_info() or {}
+    scenarios = list(session.test_scenarios.all())
+    detailed = [(s.scenario_id, dc) for s in scenarios
+                if (dc := _scenario_detailed_case(s)) is not None]
+    return {
+        'title': session.title,
+        'requirement_id': session.requirement_id or info.get('requirement_id', 'REQ-001'),
+        'requirements_text': session.requirements_text,
+        'generated_by': session.user.username,
+        'created_at': session.created_at,
+        'clarity': session.clarity_score,
+        'completeness': session.completeness_score,
+        'testability': session.testability_score,
+        'overall': session.accuracy_score,
+        'severity': session.severity or 'Medium',
+        'label': session.get_score_label(),
+        'analysis': info,
+        'strengths': [f.message for f in session.feedback_items.filter(feedback_type='positive')],
+        'warnings': [f.message for f in session.feedback_items.filter(feedback_type='warning')],
+        'conditions': list(session.test_conditions.all()),
+        'gaps': list(session.gaps.all()),
+        'scenarios': scenarios,
+        'detailed': detailed,
+        'team_notes': session.team_notes,
+    }
+
+
+# ─────────────────────────────────────────────
+# Export — CSV (full report, multi-section)
 # ─────────────────────────────────────────────
 
 @login_required
 def export_csv_view(request, session_id):
     import csv
     session = _get_accessible_session(session_id, request.user)
+    d = _collect_export_data(session)
 
     response = HttpResponse(content_type='text/csv')
-    response['Content-Disposition'] = f'attachment; filename="test_scenarios_{session_id}.csv"'
+    response['Content-Disposition'] = f'attachment; filename="qa_report_{session_id}.csv"'
+    w = csv.writer(response)
+    blank = lambda: w.writerow([])
 
-    writer = csv.writer(response)
-    writer.writerow([
-        'Scenario ID', 'Requirement Ref', 'Condition Ref',
-        'Description', 'Preconditions', 'Expected Result',
-        'Type', 'Priority', 'User Rating',
-    ])
-    for s in session.test_scenarios.all():
-        writer.writerow([
-            s.scenario_id, s.requirement_ref, s.condition_ref,
-            s.description, s.preconditions, s.expected_result,
-            s.scenario_type, s.priority, s.user_rating,
-        ])
+    # 1. Summary
+    w.writerow(['SECTION', 'Summary'])
+    w.writerow(['Project', d['title']])
+    w.writerow(['Requirement ID', d['requirement_id']])
+    w.writerow(['Overall Score', f"{d['overall']}% ({d['label']})"])
+    w.writerow(['Clarity', f"{d['clarity']}%"])
+    w.writerow(['Completeness', f"{d['completeness']}%"])
+    w.writerow(['Testability', f"{d['testability']}%"])
+    w.writerow(['Severity', d['severity']])
+    w.writerow(['Generated By', d['generated_by']])
+    w.writerow(['Date', d['created_at'].strftime('%Y-%m-%d %H:%M')])
+    blank()
+
+    # 2. Requirement text
+    w.writerow(['SECTION', 'Requirement'])
+    w.writerow([d['requirements_text']])
+    blank()
+
+    # 3. Requirement Analysis
+    w.writerow(['SECTION', 'Requirement Analysis'])
+    for label, key in _ANALYSIS_FIELDS:
+        w.writerow([label, '; '.join(str(x) for x in d['analysis'].get(key, []))])
+    blank()
+
+    # 4. Quality findings
+    w.writerow(['SECTION', 'Strengths'])
+    for x in d['strengths']:
+        w.writerow([x])
+    blank()
+    w.writerow(['SECTION', 'Warnings'])
+    for x in d['warnings']:
+        w.writerow([x])
+    blank()
+
+    # 5. Test Conditions
+    w.writerow(['SECTION', 'Test Conditions'])
+    w.writerow(['Condition ID', 'Description', 'Type', 'Priority'])
+    for c in d['conditions']:
+        w.writerow([c.condition_id, c.description, c.condition_type, c.priority])
+    blank()
+
+    # 6. Review Findings
+    w.writerow(['SECTION', 'Review Findings'])
+    w.writerow(['Issue ID', 'Issue Type', 'Description', 'Suggested Clarification'])
+    for g in d['gaps']:
+        w.writerow([g.issue_id, g.issue_type, g.description, g.suggested_clarification])
+    blank()
+
+    # 7. Test Scenarios
+    w.writerow(['SECTION', 'Test Scenarios'])
+    w.writerow(['ID', 'Req Ref', 'Cond Ref', 'Description', 'Preconditions',
+                'Steps', 'Expected Result', 'Type', 'Priority', 'Rating'])
+    for s in d['scenarios']:
+        w.writerow([s.scenario_id, s.requirement_ref, s.condition_ref, s.description,
+                    s.preconditions, ' | '.join(s.get_steps()), s.expected_result,
+                    s.scenario_type, s.priority, s.user_rating or '-'])
+    blank()
+
+    # 8. Detailed Test Cases (only if generated)
+    if d['detailed']:
+        w.writerow(['SECTION', 'Detailed Test Cases'])
+        w.writerow(['Scenario ID', 'Test Data', 'Steps', 'Expected Results', 'Postconditions'])
+        for sid, dc in d['detailed']:
+            w.writerow([sid, dc.test_data, ' | '.join(dc.get_steps()),
+                        dc.expected_results, dc.postconditions])
+        blank()
+
+    # 9. Team Notes (only if any)
+    if d['team_notes']:
+        w.writerow(['SECTION', 'Team Notes'])
+        w.writerow([d['team_notes']])
 
     return response
 
@@ -773,9 +986,9 @@ def export_pdf_view(request, session_id):
     from reportlab.lib.units import cm
     from reportlab.lib import colors
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-    from reportlab.lib.enums import TA_LEFT
 
     session = _get_accessible_session(session_id, request.user)
+    d = _collect_export_data(session)
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -785,79 +998,123 @@ def export_pdf_view(request, session_id):
     )
 
     styles = getSampleStyleSheet()
-
     title_style = ParagraphStyle('ReportTitle', parent=styles['Title'], fontSize=16, spaceAfter=6)
-    heading_style = ParagraphStyle('ReportHeading', parent=styles['Heading2'], fontSize=12, spaceAfter=4)
+    heading_style = ParagraphStyle('ReportHeading', parent=styles['Heading2'], fontSize=12, spaceBefore=8, spaceAfter=4)
     normal_style = ParagraphStyle('ReportNormal', parent=styles['Normal'], fontSize=9, leading=12)
-    header_cell_style = ParagraphStyle(
-        'HeaderCell', parent=styles['Normal'], fontSize=8, leading=10,
-        textColor=colors.white, fontName='Helvetica-Bold',
-    )
-    body_cell_style = ParagraphStyle(
-        'BodyCell', parent=styles['Normal'], fontSize=7.5, leading=10,
-        textColor=colors.black, wordWrap='CJK',
-    )
+    header_cell_style = ParagraphStyle('HeaderCell', parent=styles['Normal'], fontSize=8, leading=10,
+                                       textColor=colors.white, fontName='Helvetica-Bold')
+    body_cell_style = ParagraphStyle('BodyCell', parent=styles['Normal'], fontSize=7.5, leading=10,
+                                      textColor=colors.black, wordWrap='CJK')
+
+    table_style = TableStyle([
+        ('BACKGROUND',    (0, 0), (-1, 0), colors.HexColor('#2c3e50')),
+        ('TEXTCOLOR',     (0, 0), (-1, 0), colors.white),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f2f2f2')]),
+        ('GRID',          (0, 0), (-1, -1), 0.4, colors.HexColor('#cccccc')),
+        ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING',    (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 4),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
+    ])
+
+    def esc(t):
+        return (str(t).replace('&', '&amp;').replace('<', '&lt;')
+                .replace('>', '&gt;').replace('\n', '<br/>'))
+
+    def make_table(headers, rows, col_widths):
+        data = [[Paragraph(h, header_cell_style) for h in headers]]
+        for row in rows:
+            data.append([c if isinstance(c, Paragraph) else Paragraph(esc(c), body_cell_style) for c in row])
+        t = Table(data, colWidths=col_widths, repeatRows=1)
+        t.setStyle(table_style)
+        return t
 
     story = []
-    story.append(Paragraph('Test Scenario Report', title_style))
-    story.append(Paragraph(f'Project: {session.title}', heading_style))
+
+    # ── Header / summary ──
+    story.append(Paragraph('QA Analysis &amp; Test Scenario Report', title_style))
+    story.append(Paragraph(f'Project: {esc(d["title"])}', heading_style))
     story.append(Paragraph(
-        f'Quality Score: {session.accuracy_score}% ({session.get_score_label()})', normal_style
-    ))
-    story.append(Spacer(1, 0.5*cm))
+        f'Requirement ID: {esc(d["requirement_id"])} &nbsp;|&nbsp; Generated by: {esc(d["generated_by"])} '
+        f'&nbsp;|&nbsp; {d["created_at"].strftime("%d %b %Y %H:%M")}', normal_style))
+    story.append(Spacer(1, 0.3*cm))
+    story.append(make_table(
+        ['Clarity', 'Completeness', 'Testability', 'Overall', 'Severity'],
+        [[f'{d["clarity"]}%', f'{d["completeness"]}%', f'{d["testability"]}%',
+          f'{d["overall"]}% ({d["label"]})', d['severity']]],
+        [3.4*cm]*5))
+    story.append(Spacer(1, 0.4*cm))
 
-    story.append(Paragraph('Requirements', heading_style))
-    req_text = session.requirements_text.replace('&', '&amp;').replace('<', '&lt;').replace('\n', '<br/>')
-    story.append(Paragraph(req_text, normal_style))
-    story.append(Spacer(1, 0.5*cm))
+    # ── 1. Requirement ──
+    story.append(Paragraph('1. Requirement', heading_style))
+    story.append(Paragraph(esc(d['requirements_text']), normal_style))
 
-    story.append(Paragraph('Analysis Feedback', heading_style))
-    for item in session.feedback_items.all():
-        prefix = '&#10003;' if item.feedback_type == 'positive' else '&#9632;'
-        safe_msg = item.message.replace('&', '&amp;').replace('<', '&lt;')
-        story.append(Paragraph(f'{prefix} {safe_msg}', normal_style))
-    story.append(Spacer(1, 0.5*cm))
+    # ── 2. Requirement Analysis ──
+    analysis_rows = [[label, '; '.join(str(x) for x in d['analysis'].get(key, []))]
+                     for label, key in _ANALYSIS_FIELDS if d['analysis'].get(key)]
+    if analysis_rows:
+        story.append(Paragraph('2. Requirement Analysis', heading_style))
+        story.append(make_table(['Field', 'Details'], analysis_rows, [4*cm, 13*cm]))
 
-    story.append(Paragraph('Generated Test Scenarios', heading_style))
-    story.append(Spacer(1, 0.2*cm))
+    # ── 3. Quality Assessment ──
+    if d['strengths'] or d['warnings']:
+        story.append(Paragraph('3. Quality Assessment', heading_style))
+        for s in d['strengths']:
+            story.append(Paragraph(f'&#10003; {esc(s)}', normal_style))
+        for wn in d['warnings']:
+            story.append(Paragraph(f'&#9650; {esc(wn)}', normal_style))
 
-    col_widths = [1.4*cm, 3.8*cm, 3.3*cm, 4.9*cm, 3.6*cm]
-    header_labels = ['ID', 'Description', 'Pre-Conditions', 'Test Steps', 'Expected Result']
-    table_data = [[Paragraph(label, header_cell_style) for label in header_labels]]
+    # ── 4. Test Conditions ──
+    if d['conditions']:
+        story.append(Paragraph('4. Test Conditions', heading_style))
+        rows = [[c.condition_id, c.description, c.condition_type, c.priority] for c in d['conditions']]
+        story.append(make_table(['ID', 'Condition', 'Type', 'Priority'], rows,
+                                [1.6*cm, 10.4*cm, 2.6*cm, 2.4*cm]))
 
-    for s in session.test_scenarios.all():
-        steps = s.get_steps()
-        steps_html = '<br/>'.join(
-            f'{i+1}. {step.replace("&", "&amp;").replace("<", "&lt;")}'
-            for i, step in enumerate(steps)
-        )
-        table_data.append([
-            Paragraph(s.scenario_id, body_cell_style),
-            Paragraph(s.description.replace('&', '&amp;').replace('<', '&lt;'), body_cell_style),
-            Paragraph(s.preconditions.replace('&', '&amp;').replace('<', '&lt;'), body_cell_style),
-            Paragraph(steps_html, body_cell_style),
-            Paragraph(s.expected_result.replace('&', '&amp;').replace('<', '&lt;'), body_cell_style),
-        ])
+    # ── 5. Review Findings ──
+    if d['gaps']:
+        story.append(Paragraph('5. Requirement Review Findings', heading_style))
+        rows = [[g.issue_id, g.issue_type, g.description, g.suggested_clarification] for g in d['gaps']]
+        story.append(make_table(['ID', 'Type', 'Description', 'Suggested Clarification'], rows,
+                                [1.4*cm, 2.8*cm, 6.4*cm, 6.4*cm]))
 
-    table = Table(table_data, colWidths=col_widths, repeatRows=1)
-    table.setStyle(TableStyle([
-        ('BACKGROUND',   (0, 0), (-1, 0), colors.HexColor('#2c3e50')),
-        ('TEXTCOLOR',    (0, 0), (-1, 0), colors.white),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f2f2f2')]),
-        ('GRID',         (0, 0), (-1, -1), 0.4, colors.HexColor('#cccccc')),
-        ('VALIGN',       (0, 0), (-1, -1), 'TOP'),
-        ('TOPPADDING',   (0, 0), (-1, -1), 4),
-        ('BOTTOMPADDING',(0, 0), (-1, -1), 4),
-        ('LEFTPADDING',  (0, 0), (-1, -1), 4),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
-    ]))
-    story.append(table)
+    # ── 6. Test Scenarios ──
+    if d['scenarios']:
+        story.append(Paragraph('6. Traceable Test Scenarios', heading_style))
+        rows = []
+        for s in d['scenarios']:
+            steps_html = '<br/>'.join(f'{i+1}. {esc(step)}' for i, step in enumerate(s.get_steps()))
+            meta = (f'<font size=6 color="#888888">Req: {esc(s.requirement_ref or "-")} &middot; '
+                    f'Cond: {esc(s.condition_ref or "-")} &middot; {esc(s.scenario_type)} &middot; '
+                    f'Rating: {esc(s.user_rating or "-")}</font><br/>')
+            desc = Paragraph(meta + esc(s.description), body_cell_style)
+            rows.append([s.scenario_id, desc, s.preconditions, steps_html, s.expected_result, s.priority])
+        story.append(make_table(
+            ['ID', 'Description', 'Pre-Conditions', 'Test Steps', 'Expected Result', 'Priority'],
+            rows, [1.3*cm, 4.2*cm, 3.0*cm, 3.9*cm, 3.1*cm, 1.5*cm]))
+
+    # ── 7. Detailed Test Cases (only if generated) ──
+    if d['detailed']:
+        story.append(Paragraph('7. Detailed Test Cases', heading_style))
+        rows = []
+        for sid, dc in d['detailed']:
+            steps_html = '<br/>'.join(f'{i+1}. {esc(step)}' for i, step in enumerate(dc.get_steps()))
+            rows.append([sid, dc.test_data, steps_html, dc.expected_results, dc.postconditions])
+        story.append(make_table(
+            ['Scenario', 'Test Data', 'Steps', 'Expected Results', 'Postconditions'],
+            rows, [1.8*cm, 3.4*cm, 4.4*cm, 3.7*cm, 3.7*cm]))
+
+    # ── 8. Team Notes (only if any) ──
+    if d['team_notes']:
+        story.append(Paragraph('8. Team Notes', heading_style))
+        story.append(Paragraph(esc(d['team_notes']), normal_style))
 
     doc.build(story)
     buffer.seek(0)
 
     response = HttpResponse(buffer, content_type='application/pdf')
-    response['Content-Disposition'] = f'attachment; filename="test_scenarios_{session_id}.pdf"'
+    response['Content-Disposition'] = f'attachment; filename="qa_report_{session_id}.pdf"'
     return response
 
 
@@ -871,44 +1128,116 @@ def export_excel_view(request, session_id):
     from openpyxl.styles import Font, PatternFill, Alignment
 
     session = _get_accessible_session(session_id, request.user)
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = 'Test Scenarios'
-
-    ws['A1'] = 'Project'
-    ws['B1'] = session.title
-    ws['A2'] = 'Quality Score'
-    ws['B2'] = f"{session.accuracy_score}% ({session.get_score_label()})"
-    ws['A3'] = 'Generated By'
-    ws['B3'] = session.user.username
+    d = _collect_export_data(session)
 
     header_font = Font(bold=True, color='FFFFFF')
     header_fill = PatternFill(start_color='2c3e50', end_color='2c3e50', fill_type='solid')
-    center_align = Alignment(horizontal='center', vertical='top', wrap_text=True)
-    top_align = Alignment(vertical='top', wrap_text=True)
+    label_font = Font(bold=True)
+    top_wrap = Alignment(vertical='top', wrap_text=True)
+    center_wrap = Alignment(horizontal='center', vertical='top', wrap_text=True)
 
-    headers = ['ID', 'Description', 'Pre-Conditions', 'Test Steps', 'Expected Result', 'Type']
-    header_row = 5
-    for col_num, header_text in enumerate(headers, start=1):
-        cell = ws.cell(row=header_row, column=col_num, value=header_text)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = center_align
+    def header_row(ws, headers, row=1):
+        for col, text in enumerate(headers, start=1):
+            cell = ws.cell(row=row, column=col, value=text)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center_wrap
 
-    alt_fill = PatternFill(start_color='f2f2f2', end_color='f2f2f2', fill_type='solid')
-    for row_idx, s in enumerate(session.test_scenarios.all(), start=header_row + 1):
-        steps_text = '\n'.join(s.get_steps())
-        row_data = [s.scenario_id, s.description, s.preconditions, steps_text, s.expected_result, s.scenario_type]
-        for col_num, value in enumerate(row_data, start=1):
-            cell = ws.cell(row=row_idx, column=col_num, value=value)
-            cell.alignment = top_align
-            if row_idx % 2 == 0:
-                cell.fill = alt_fill
+    def set_widths(ws, widths):
+        for i, wdt in enumerate(widths, start=1):
+            ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = wdt
 
-    column_widths = [10, 30, 30, 45, 35, 12]
-    for i, width in enumerate(column_widths, start=1):
-        ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = width
+    def wrap_sheet(ws, start_row=2):
+        for row in ws.iter_rows(min_row=start_row):
+            for cell in row:
+                cell.alignment = top_wrap
+
+    wb = Workbook()
+
+    # ── Sheet 1: Summary ──
+    s1 = wb.active
+    s1.title = 'Summary'
+    summary = [
+        ('Project', d['title']),
+        ('Requirement ID', d['requirement_id']),
+        ('Overall Score', f"{d['overall']}% ({d['label']})"),
+        ('Clarity', f"{d['clarity']}%"),
+        ('Completeness', f"{d['completeness']}%"),
+        ('Testability', f"{d['testability']}%"),
+        ('Severity', d['severity']),
+        ('Generated By', d['generated_by']),
+        ('Date', d['created_at'].strftime('%Y-%m-%d %H:%M')),
+        ('Requirement', d['requirements_text']),
+        ('Strengths', '\n'.join(d['strengths'])),
+        ('Warnings', '\n'.join(d['warnings'])),
+    ]
+    for r, (label, value) in enumerate(summary, start=1):
+        c1 = s1.cell(row=r, column=1, value=label); c1.font = label_font; c1.alignment = top_wrap
+        s1.cell(row=r, column=2, value=value).alignment = top_wrap
+    set_widths(s1, [18, 80])
+
+    # ── Sheet 2: Requirement Analysis ──
+    s2 = wb.create_sheet('Requirement Analysis')
+    header_row(s2, ['Field', 'Details'])
+    for r, (label, key) in enumerate(_ANALYSIS_FIELDS, start=2):
+        s2.cell(row=r, column=1, value=label)
+        s2.cell(row=r, column=2, value='\n'.join(str(x) for x in d['analysis'].get(key, [])))
+    wrap_sheet(s2)
+    set_widths(s2, [22, 90])
+
+    # ── Sheet 3: Test Conditions ──
+    s3 = wb.create_sheet('Test Conditions')
+    header_row(s3, ['Condition ID', 'Description', 'Type', 'Priority'])
+    for r, c in enumerate(d['conditions'], start=2):
+        s3.cell(row=r, column=1, value=c.condition_id)
+        s3.cell(row=r, column=2, value=c.description)
+        s3.cell(row=r, column=3, value=c.condition_type)
+        s3.cell(row=r, column=4, value=c.priority)
+    wrap_sheet(s3)
+    set_widths(s3, [14, 70, 14, 12])
+
+    # ── Sheet 4: Review Findings ──
+    s4 = wb.create_sheet('Review Findings')
+    header_row(s4, ['Issue ID', 'Issue Type', 'Description', 'Suggested Clarification'])
+    for r, g in enumerate(d['gaps'], start=2):
+        s4.cell(row=r, column=1, value=g.issue_id)
+        s4.cell(row=r, column=2, value=g.issue_type)
+        s4.cell(row=r, column=3, value=g.description)
+        s4.cell(row=r, column=4, value=g.suggested_clarification)
+    wrap_sheet(s4)
+    set_widths(s4, [12, 18, 45, 45])
+
+    # ── Sheet 5: Test Scenarios ──
+    s5 = wb.create_sheet('Test Scenarios')
+    header_row(s5, ['ID', 'Req Ref', 'Cond Ref', 'Description', 'Preconditions',
+                    'Test Steps', 'Expected Result', 'Type', 'Priority', 'Rating'])
+    for r, s in enumerate(d['scenarios'], start=2):
+        values = [s.scenario_id, s.requirement_ref, s.condition_ref, s.description,
+                  s.preconditions, '\n'.join(s.get_steps()), s.expected_result,
+                  s.scenario_type, s.priority, s.user_rating or '-']
+        for col, value in enumerate(values, start=1):
+            s5.cell(row=r, column=col, value=value)
+    wrap_sheet(s5)
+    set_widths(s5, [10, 12, 10, 32, 28, 40, 32, 10, 10, 10])
+
+    # ── Sheet 6: Detailed Cases (only if generated) ──
+    if d['detailed']:
+        s6 = wb.create_sheet('Detailed Cases')
+        header_row(s6, ['Scenario ID', 'Test Data', 'Steps', 'Expected Results', 'Postconditions'])
+        for r, (sid, dc) in enumerate(d['detailed'], start=2):
+            s6.cell(row=r, column=1, value=sid)
+            s6.cell(row=r, column=2, value=dc.test_data)
+            s6.cell(row=r, column=3, value='\n'.join(dc.get_steps()))
+            s6.cell(row=r, column=4, value=dc.expected_results)
+            s6.cell(row=r, column=5, value=dc.postconditions)
+        wrap_sheet(s6)
+        set_widths(s6, [14, 35, 45, 35, 30])
+
+    # ── Sheet 7: Team Notes (only if any) ──
+    if d['team_notes']:
+        s7 = wb.create_sheet('Team Notes')
+        s7.cell(row=1, column=1, value=d['team_notes']).alignment = top_wrap
+        set_widths(s7, [100])
 
     buffer = io.BytesIO()
     wb.save(buffer)
@@ -918,5 +1247,5 @@ def export_excel_view(request, session_id):
         buffer,
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     )
-    response['Content-Disposition'] = f'attachment; filename="test_scenarios_{session_id}.xlsx"'
+    response['Content-Disposition'] = f'attachment; filename="qa_report_{session_id}.xlsx"'
     return response

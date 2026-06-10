@@ -13,14 +13,21 @@ urlpatterns = [
     path('workspace/session/<int:session_id>/', views.load_session_view, name='load_session'),
 
     # Shared workspace — must come after the more specific patterns above
+    path('workspaces/state/', views.my_workspaces_state_view, name='my_workspaces_state'),
     path('workspace/create/', views.create_workspace_view, name='create_workspace'),
     path('workspace/<str:workspace_id>/state/', views.workspace_state_view, name='workspace_state'),
     path('workspace/<str:workspace_id>/', views.shared_workspace_view, name='shared_workspace'),
 
     # Analysis
     path('analyze/', views.analyze_view, name='analyze'),
-    path('confirm/', views.confirm_view, name='confirm'),
     path('reanalyze/', views.reanalyze_view, name='reanalyze'),
+
+    # Workspace membership management
+    path('rename_workspace/', views.rename_workspace_view, name='rename_workspace'),
+    path('leave_workspace/', views.leave_workspace_view, name='leave_workspace'),
+    path('add_member/', views.add_member_view, name='add_member'),
+    path('remove_member/', views.remove_member_view, name='remove_member'),
+    path('delete_workspace/', views.delete_workspace_view, name='delete_workspace'),
 
     # Collaborative output editing
     path('update_output_field/', views.update_output_field_view, name='update_output_field'),
@@ -42,7 +49,4 @@ urlpatterns = [
     path('export/pdf/<int:session_id>/', views.export_pdf_view, name='export_pdf'),
     path('export/excel/<int:session_id>/', views.export_excel_view, name='export_excel'),
     path('export/csv/<int:session_id>/', views.export_csv_view, name='export_csv'),
-
-    # Dashboard
-    path('dashboard/', views.dashboard_view, name='dashboard'),
 ]

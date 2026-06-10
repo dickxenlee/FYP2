@@ -24,6 +24,7 @@ const toggleSidebarBtn  = document.getElementById('toggleSidebar');
 const newSessionBtn     = document.getElementById('newSession');
 const csrfToken         = document.getElementById('csrfToken').value;
 const workspaceId       = (document.getElementById('workspaceId') || {}).value || '';
+const canDeleteChats    = ((document.getElementById('canDeleteChats') || {}).value || '1') === '1';
 
 let currentSessionId = null;
 
@@ -328,6 +329,7 @@ function handleDeleteItem(sessionId, itemEl) {
     })
     .then(function (res) { return res.json(); })
     .then(function (data) {
+        if (data.error) { showToast(data.error, 'error'); return; }
         if (data.system_action !== 'chat_deleted') return;
         if (itemEl) itemEl.remove();
         if (historyList.querySelectorAll('.history-item').length === 0) {
@@ -808,6 +810,9 @@ function buildHistoryItem(sessionId, title, scoreColor, score, active) {
     var li = document.createElement('li');
     li.className = 'history-item' + (active ? ' active' : '');
     li.dataset.sessionId = sessionId;
+    var deleteOption = canDeleteChats
+        ? '<button class="menu-option btn-delete-item">&#128465;&nbsp; Delete</button>'
+        : '';
     li.innerHTML =
         '<span class="history-title">' + escapeHtml(title) + '</span>' +
         '<div class="history-item-right">' +
@@ -817,7 +822,7 @@ function buildHistoryItem(sessionId, title, scoreColor, score, active) {
         '<div class="item-menu-dropdown">' +
         '<button class="menu-option btn-pin-item">&#128204;&nbsp; Pin</button>' +
         '<button class="menu-option btn-rename-item">&#9998;&nbsp; Rename</button>' +
-        '<button class="menu-option btn-delete-item">&#128465;&nbsp; Delete</button>' +
+        deleteOption +
         '</div></div></div>';
     return li;
 }
@@ -1038,6 +1043,51 @@ function pollWorkspaceState() {
         .catch(function () { /* transient network error — ignore, try again next tick */ });
 }
 
-if (workspaceId) {
-    setInterval(pollWorkspaceState, 8000);
+// ─────────────────────────────────────────────
+// Live "My Team Workspaces" sidebar list
+// Rebuilds the list so newly created/joined workspaces and changing member
+// counts appear without a page reload. Runs in both personal and workspace views.
+// ─────────────────────────────────────────────
+function buildWsListItem(ws) {
+    var li = document.createElement('li');
+    li.className = 'ws-list-item' + (ws.workspace_id === workspaceId ? ' active' : '');
+    var name = ws.name.length > 20 ? ws.name.substring(0, 20) + '…' : ws.name;
+    li.innerHTML =
+        '<a href="/workspace/' + encodeURIComponent(ws.workspace_id) + '/">' +
+        '<span class="ws-list-icon">&#127962;</span>' +
+        '<span class="ws-list-name">' + escapeHtml(name) + '</span>' +
+        '<span class="ws-list-members">&#128101; ' + ws.member_count + '</span>' +
+        '<span class="ws-list-badge">' + escapeHtml(ws.workspace_id) + '</span>' +
+        '</a>';
+    return li;
 }
+
+function pollMyWorkspaces() {
+    if (document.hidden) return;
+
+    fetch('/workspaces/state/')
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (data) {
+            if (!data || !data.workspaces) return;
+            var list = document.getElementById('myWorkspacesList');
+            if (!list) return;
+
+            list.innerHTML = '';
+            if (data.workspaces.length === 0) {
+                list.innerHTML = '<li class="ws-empty">No team workspaces yet.</li>';
+                return;
+            }
+            data.workspaces.forEach(function (ws) {
+                list.appendChild(buildWsListItem(ws));
+            });
+        })
+        .catch(function () { /* transient network error — ignore, retry next tick */ });
+}
+
+function pollAll() {
+    pollWorkspaceState();   // self-guards: returns early outside a workspace
+    pollMyWorkspaces();
+}
+
+setInterval(pollAll, 8000);
+pollMyWorkspaces();

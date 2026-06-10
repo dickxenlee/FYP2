@@ -10,14 +10,13 @@ class GeminiQuotaExceeded(Exception):
 
 class GeminiService:
     """
-    Wraps the Google Gemini API.
-    Uses gemini-1.5-flash: 1,500 requests/day on the free tier
-    (vs gemini-2.5-flash which only allows 20/day).
+    Wraps the Google Gemini API (model: gemini-2.5-flash-lite, chosen for its
+    high free-tier request limit).
     """
 
     def __init__(self):
         genai.configure(api_key=settings.GEMINI_API_KEY)
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        self.model = genai.GenerativeModel('gemini-2.5-flash-lite')
 
     def fetch_response(self, prompt: str) -> str:
         """

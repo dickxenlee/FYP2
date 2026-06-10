@@ -12,15 +12,6 @@ DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '127.0.0.1,localhost').split(',')
 
-# Required for POST/CSRF over HTTPS (e.g. on Render). Derived from ALLOWED_HOSTS:
-# a leading-dot host like ".onrender.com" becomes the wildcard "https://*.onrender.com".
-CSRF_TRUSTED_ORIGINS = []
-for _host in ALLOWED_HOSTS:
-    _host = _host.strip()
-    if _host in ('', '127.0.0.1', 'localhost'):
-        continue
-    CSRF_TRUSTED_ORIGINS.append('https://*' + _host if _host.startswith('.') else 'https://' + _host)
-
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -69,8 +60,16 @@ DATABASES = {
     }
 }
 
+AUTHENTICATION_BACKENDS = [
+    'core.auth_backends.EmailOrUsernameBackend',
+    'django.contrib.auth.backends.ModelBackend',
+]
+
 AUTH_PASSWORD_VALIDATORS = [
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
 LANGUAGE_CODE = 'en-us'
@@ -79,17 +78,13 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = '/static/'
-STATICFILES_DIRS = [BASE_DIR / 'core' / 'static']
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+# core/static is auto-discovered via AppDirectoriesFinder (core is an installed app).
 
-# Serve static files efficiently in production via WhiteNoise
+# WhiteNoise serves static files in production (DEBUG=False) with compression.
 STORAGES = {
-    'default': {
-        'BACKEND': 'django.core.files.storage.FileSystemStorage',
-    },
-    'staticfiles': {
-        'BACKEND': 'whitenoise.storage.CompressedStaticFilesStorage',
-    },
+    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+    'staticfiles': {'BACKEND': 'whitenoise.storage.CompressedStaticFilesStorage'},
 }
 
 MEDIA_URL = '/media/'

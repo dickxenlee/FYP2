@@ -85,7 +85,6 @@ class QAAnalyzer:
     """
     Single comprehensive LLM call that returns the full QA report:
     requirement extraction, quality scores, test conditions, gaps, and test scenarios.
-    Replaces the separate RequirementAnalyzer + TestScenarioGenerator for the main flow.
     """
 
     def __init__(self):
