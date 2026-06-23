@@ -2,6 +2,7 @@ import io
 import json
 
 from django.shortcuts import render, redirect, get_object_or_404
+from django.contrib import messages
 from django.contrib.auth import login, logout
 from django.contrib.auth.models import User
 from django.contrib.auth.decorators import login_required
@@ -46,6 +47,7 @@ def register_view(request):
         if form.is_valid():
             user = form.save()
             login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+            messages.success(request, f'Registration successful. Welcome, {user.username}!')
             return redirect('workspace')
     else:
         form = RegisterForm()
