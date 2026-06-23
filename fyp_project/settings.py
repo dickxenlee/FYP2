@@ -12,14 +12,27 @@ DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '127.0.0.1,localhost').split(',')
 
-# Required for POST/CSRF over HTTPS (e.g. on Render). Derived from ALLOWED_HOSTS:
-# a leading-dot host like ".onrender.com" becomes the wildcard "https://*.onrender.com".
-CSRF_TRUSTED_ORIGINS = []
-for _host in ALLOWED_HOSTS:
-    _host = _host.strip()
-    if _host in ('', '127.0.0.1', 'localhost'):
-        continue
-    CSRF_TRUSTED_ORIGINS.append('https://*' + _host if _host.startswith('.') else 'https://' + _host)
+# ── Production security (applied only when DEBUG is False) ──
+if not DEBUG:
+    if SECRET_KEY.startswith('django-insecure-'):
+        from django.core.exceptions import ImproperlyConfigured
+        raise ImproperlyConfigured(
+            'Set a strong SECRET_KEY environment variable for production.'
+        )
+    # Render/most hosts terminate HTTPS at a proxy and forward this header,
+    # so Django knows the request is secure (fixes CSRF + redirect issues).
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31536000  # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    # Trust the deployed domain(s) for cross-origin POSTs (e.g. your-app.onrender.com).
+    CSRF_TRUSTED_ORIGINS = [
+        f'https://{h.strip()}' for h in ALLOWED_HOSTS
+        if h.strip() and h.strip() not in ('127.0.0.1', 'localhost', '*')
+    ]
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -69,8 +82,16 @@ DATABASES = {
     }
 }
 
+AUTHENTICATION_BACKENDS = [
+    'core.auth_backends.EmailOrUsernameBackend',
+    'django.contrib.auth.backends.ModelBackend',
+]
+
 AUTH_PASSWORD_VALIDATORS = [
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
 LANGUAGE_CODE = 'en-us'
@@ -79,17 +100,13 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = '/static/'
-STATICFILES_DIRS = [BASE_DIR / 'core' / 'static']
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+# core/static is auto-discovered via AppDirectoriesFinder (core is an installed app).
 
-# Serve static files efficiently in production via WhiteNoise
+# WhiteNoise serves static files in production (DEBUG=False) with compression.
 STORAGES = {
-    'default': {
-        'BACKEND': 'django.core.files.storage.FileSystemStorage',
-    },
-    'staticfiles': {
-        'BACKEND': 'whitenoise.storage.CompressedStaticFilesStorage',
-    },
+    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+    'staticfiles': {'BACKEND': 'whitenoise.storage.CompressedStaticFilesStorage'},
 }
 
 MEDIA_URL = '/media/'

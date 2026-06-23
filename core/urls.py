@@ -13,18 +13,29 @@ urlpatterns = [
     path('workspace/session/<int:session_id>/', views.load_session_view, name='load_session'),
 
     # Shared workspace — must come after the more specific patterns above
+    path('workspaces/state/', views.my_workspaces_state_view, name='my_workspaces_state'),
     path('workspace/create/', views.create_workspace_view, name='create_workspace'),
     path('workspace/<str:workspace_id>/state/', views.workspace_state_view, name='workspace_state'),
+    path('workspace/<str:workspace_id>/draft/', views.workspace_draft_view, name='workspace_draft'),
+    path('workspace/<str:workspace_id>/draft/save/', views.save_draft_view, name='save_draft'),
+    path('workspace/<str:workspace_id>/draft/generate/', views.generate_from_draft_view, name='generate_from_draft'),
     path('workspace/<str:workspace_id>/', views.shared_workspace_view, name='shared_workspace'),
 
     # Analysis
     path('analyze/', views.analyze_view, name='analyze'),
-    path('confirm/', views.confirm_view, name='confirm'),
     path('reanalyze/', views.reanalyze_view, name='reanalyze'),
+
+    # Workspace membership management
+    path('rename_workspace/', views.rename_workspace_view, name='rename_workspace'),
+    path('leave_workspace/', views.leave_workspace_view, name='leave_workspace'),
+    path('add_member/', views.add_member_view, name='add_member'),
+    path('remove_member/', views.remove_member_view, name='remove_member'),
+    path('delete_workspace/', views.delete_workspace_view, name='delete_workspace'),
 
     # Collaborative output editing
     path('update_output_field/', views.update_output_field_view, name='update_output_field'),
     path('update_team_notes/', views.update_team_notes_view, name='update_team_notes'),
+    path('session/<int:session_id>/notes/', views.session_notes_view, name='session_notes'),
 
     # Session management
     path('delete_history/', views.delete_history_view, name='delete_history'),
@@ -34,15 +45,13 @@ urlpatterns = [
 
     # Detailed cases
     path('generate_detailed_cases/', views.generate_detailed_cases_view, name='generate_detailed_cases'),
+    path('toggle_step_done/', views.toggle_step_done_view, name='toggle_step_done'),
 
-    # Ratings
-    path('rate_scenario/', views.rate_scenario_view, name='rate_scenario'),
+    # Scenario test status
+    path('toggle_scenario_done/', views.toggle_scenario_done_view, name='toggle_scenario_done'),
 
     # Exports
     path('export/pdf/<int:session_id>/', views.export_pdf_view, name='export_pdf'),
     path('export/excel/<int:session_id>/', views.export_excel_view, name='export_excel'),
     path('export/csv/<int:session_id>/', views.export_csv_view, name='export_csv'),
-
-    # Dashboard
-    path('dashboard/', views.dashboard_view, name='dashboard'),
 ]

@@ -1,6 +1,7 @@
 from django import forms
 from django.contrib.auth.models import User
 from django.contrib.auth.forms import AuthenticationForm
+from django.contrib.auth.password_validation import validate_password
 
 
 class RegisterForm(forms.ModelForm):
@@ -20,6 +21,12 @@ class RegisterForm(forms.ModelForm):
         labels = {
             'username': 'Name',
         }
+
+    def clean_password(self):
+        password = self.cleaned_data.get('password')
+        if password:
+            validate_password(password)
+        return password
 
     def save(self, commit=True):
         user = super().save(commit=False)

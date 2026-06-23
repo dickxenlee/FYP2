@@ -33,16 +33,15 @@
             <div class="form-group">
                 <label for="id_username">Email or Username</label>
                 <input type="text" id="id_username" name="username"
-                       placeholder="Value" required>
+                       placeholder="Email or Username" required>
             </div>
             <div class="form-group">
                 <label for="id_password">Password</label>
                 <input type="password" id="id_password" name="password"
-                       placeholder="Value" required>
+                       placeholder="Password" required>
             </div>
             <button type="submit" class="btn btn-submit">Sign In</button>
         </form>
-        <p class="auth-switch"><a href="#">Forgot password?</a></p>
         <p class="auth-switch">Don't have an account? <a href="{% url 'register' %}">Register</a></p>
     </div>
 </div>

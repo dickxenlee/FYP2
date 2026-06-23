@@ -1,21 +1,25 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-
-# Virtual environments
-env/
-venv/
-.venv/
-
-# Secrets
+# Secrets / environment
 .env
 
-# Django
-staticfiles/
-media/
-*.log
+# AI assistant config (not part of the project)
+CLAUDE.md
+.claude/
 
-# OS
+# Python
+*.pyc
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Django
+db.sqlite3
+db.sqlite3-journal
+/staticfiles/
+/media/
+
+# Editor / OS
+.vscode/
+.idea/
 .DS_Store
 Thumbs.db

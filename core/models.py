@@ -118,6 +118,7 @@ class TestCondition(models.Model):
         AnalysisSession, on_delete=models.CASCADE, related_name='test_conditions'
     )
     condition_id = models.CharField(max_length=10)
+    requirement_ref = models.CharField(max_length=20, blank=True, default='')
     description = models.TextField()
     condition_type = models.CharField(max_length=20, choices=CONDITION_TYPE_CHOICES)
     priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default='Medium')
@@ -164,7 +165,7 @@ class TestScenario(models.Model):
         max_length=20, choices=SCENARIO_TYPE_CHOICES, default='positive'
     )
     priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default='Medium')
-    user_rating = models.CharField(max_length=10, blank=True, default='')
+    is_done = models.BooleanField(default=False)  # tester marks the scenario done
 
     def get_steps(self):
         try:
@@ -186,6 +187,7 @@ class DetailedTestCase(models.Model):
     )
     test_data = models.TextField(blank=True, default='')
     steps_json = models.TextField(default='[]')
+    steps_done = models.TextField(default='[]')  # list of booleans aligned with steps
     expected_results = models.TextField(blank=True, default='')
     postconditions = models.TextField(blank=True, default='')
 
@@ -195,5 +197,31 @@ class DetailedTestCase(models.Model):
         except (json.JSONDecodeError, TypeError):
             return []
 
+    def get_steps_done(self):
+        try:
+            return json.loads(self.steps_done)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
     def __str__(self):
         return f"DetailedCase for {self.scenario.scenario_id}"
+
+
+class WorkspaceDraftInput(models.Model):
+    """A team member's draft requirement contribution, collected before the
+    workspace owner generates the analysis from everyone's combined input."""
+    workspace = models.ForeignKey(
+        Workspace, on_delete=models.CASCADE, related_name='draft_inputs'
+    )
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='workspace_draft_inputs'
+    )
+    text = models.TextField(blank=True, default='')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['workspace', 'user']
+        ordering = ['updated_at']
+
+    def __str__(self):
+        return f'{self.user.username} draft in {self.workspace.workspace_id}'

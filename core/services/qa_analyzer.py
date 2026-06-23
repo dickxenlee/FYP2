@@ -10,28 +10,30 @@ Return ONLY the JSON object. No markdown fences, no extra text before or after.
 
 Required JSON format:
 {{
-  "requirement_info": {{
-    "requirement_id": "REQ-001",
-    "actors": ["list of actors or users"],
-    "actions": ["list of actions the system or actor performs"],
-    "business_rules": ["list of business rules"],
-    "constraints": ["list of constraints such as formats, limits"],
-    "validation_rules": ["list of input validation rules"],
-    "error_handling": ["list of error handling requirements"],
-    "non_functional": ["list of non-functional requirements, e.g. performance, security"]
-  }},
+  "requirements": [
+    {{
+      "requirement_id": "REQ-001",
+      "title": "<short name of this requirement, under 8 words>",
+      "clarity_score": <integer 0-100 for THIS requirement>,
+      "completeness_score": <integer 0-100 for THIS requirement>,
+      "testability_score": <integer 0-100 for THIS requirement>,
+      "actors": ["list of actors or users"],
+      "actions": ["list of actions the system or actor performs"],
+      "business_rules": ["list of business rules"],
+      "constraints": ["list of constraints such as formats, limits"],
+      "validation_rules": ["list of input validation rules"],
+      "error_handling": ["list of error handling requirements"],
+      "non_functional": ["list of non-functional requirements, e.g. performance, security"]
+    }}
+  ],
   "quality_assessment": {{
-    "clarity_score": <integer 0-100>,
-    "completeness_score": <integer 0-100>,
-    "testability_score": <integer 0-100>,
-    "overall_score": <integer — weighted average of the three scores>,
-    "severity": "<High if overall < 60 | Medium if 60-79 | Low if >= 80>",
-    "positive_aspects": ["what is well-defined"],
+    "positive_aspects": ["what is well-defined across the requirements"],
     "warnings": ["what is ambiguous, missing, or hard to test"]
   }},
   "test_conditions": [
     {{
       "condition_id": "C01",
+      "requirement_ref": "REQ-001",
       "description": "<concise testable condition, one sentence>",
       "type": "<Positive | Negative | Boundary | Security | Performance>",
       "priority": "<High | Medium | Low>"
@@ -61,18 +63,24 @@ Required JSON format:
 }}
 
 Generation rules:
-- Generate 4 to 8 test_conditions covering Positive, Negative, and Boundary types at minimum
-- Generate 4 to 8 test_scenarios — link each to its condition via condition_ref
+- Identify EVERY distinct requirement in the input. If the input describes several
+  separate features (e.g. login AND password reset), create one entry per requirement:
+  REQ-001, REQ-002, REQ-003, ... Each requirement gets its own analysis block.
+- If the input is a single feature with many details, return just ONE requirement (REQ-001).
+- Every test_condition MUST set requirement_ref to the requirement it tests.
+- Every test_scenario MUST set requirement_ref (its requirement) and condition_ref (its condition).
+- Generate 3 to 6 test_conditions PER requirement, covering Positive, Negative, and Boundary.
+- Generate 3 to 6 test_scenarios PER requirement — link each to its condition via condition_ref.
 - Scenario descriptions must be concise — do NOT write step-by-step instructions
-- Only include gaps that represent real issues — omit the array if the requirement is complete
-- severity = High when overall < 60, Medium when 60–79, Low when >= 80
+- Only include gaps that represent real issues — omit the array if the requirements are complete
+- Give EACH requirement its own clarity_score, completeness_score, and testability_score (0-100).
+- quality_assessment holds only the overall positive_aspects and warnings (document-level).
+- Provide suggested_requirement if any requirement scores below 80 overall.
 
-Example output for "The system shall allow registered users to upload a profile picture":
-
-requirement_id = "REQ-001"
-test_conditions include: C01 Upload valid JPG under 5MB (Positive, High), C02 Upload PNG exactly 5MB (Boundary, High), C03 Upload file over 5MB (Negative, High)
-test_scenarios include: TS-001 linked to C01, TS-002 linked to C02, etc.
-gaps might include: G01 Ambiguity — file size limit not specified
+Example: input describing login AND password reset →
+requirements = [REQ-001 "User Login", REQ-002 "Password Reset"]
+test_conditions: C01 (ref REQ-001), C02 (ref REQ-001), C04 (ref REQ-002), ...
+test_scenarios: TS-001 (ref REQ-001, cond C01), TS-004 (ref REQ-002, cond C04), ...
 
 Requirement to analyze:
 ---
@@ -85,7 +93,6 @@ class QAAnalyzer:
     """
     Single comprehensive LLM call that returns the full QA report:
     requirement extraction, quality scores, test conditions, gaps, and test scenarios.
-    Replaces the separate RequirementAnalyzer + TestScenarioGenerator for the main flow.
     """
 
     def __init__(self):
@@ -94,7 +101,7 @@ class QAAnalyzer:
     def analyze(self, requirements_text: str) -> dict:
         """
         Returns a dict with keys:
-        requirement_info, quality_assessment, test_conditions, gaps,
+        requirements (list), quality_assessment, test_conditions, gaps,
         test_scenarios, suggested_requirement.
         """
         prompt = QA_ANALYSIS_PROMPT.format(requirements_text=requirements_text.strip())
@@ -109,26 +116,67 @@ class QAAnalyzer:
             match = re.search(r'\{.*\}', raw, re.DOTALL)
             data = json.loads(match.group() if match else raw)
 
-            req_info = data.get('requirement_info', {})
+            # Support both the new list format and the old single-requirement format.
+            raw_reqs = data.get('requirements')
+            if not isinstance(raw_reqs, list) or not raw_reqs:
+                single = data.get('requirement_info')
+                raw_reqs = [single] if isinstance(single, dict) else []
+
+            def clamp(v, default=50):
+                try:
+                    return max(0, min(100, int(v)))
+                except (ValueError, TypeError):
+                    return default
+
+            def sev(score):
+                return 'Low' if score >= 80 else 'Medium' if score >= 60 else 'High'
+
+            requirements = []
+            for i, r in enumerate(raw_reqs):
+                if not isinstance(r, dict):
+                    continue
+                rc, rco, rt = clamp(r.get('clarity_score')), clamp(r.get('completeness_score')), clamp(r.get('testability_score'))
+                rov = round((rc + rco + rt) / 3)
+                requirements.append({
+                    'requirement_id': str(r.get('requirement_id', f'REQ-{i+1:03d}')),
+                    'title': str(r.get('title', '')),
+                    'clarity_score': rc,
+                    'completeness_score': rco,
+                    'testability_score': rt,
+                    'overall_score': rov,
+                    'severity': sev(rov),
+                    'actors': list(r.get('actors', [])),
+                    'actions': list(r.get('actions', [])),
+                    'business_rules': list(r.get('business_rules', [])),
+                    'constraints': list(r.get('constraints', [])),
+                    'validation_rules': list(r.get('validation_rules', [])),
+                    'error_handling': list(r.get('error_handling', [])),
+                    'non_functional': list(r.get('non_functional', [])),
+                })
+            if not requirements:
+                requirements = [{'requirement_id': 'REQ-001', 'title': '',
+                                 'clarity_score': 0, 'completeness_score': 0, 'testability_score': 0,
+                                 'overall_score': 0, 'severity': 'High',
+                                 'actors': [], 'actions': [], 'business_rules': [], 'constraints': [],
+                                 'validation_rules': [], 'error_handling': [], 'non_functional': []}]
+
             qa = data.get('quality_assessment', {})
 
-            clarity = max(0, min(100, int(qa.get('clarity_score', 50))))
-            completeness = max(0, min(100, int(qa.get('completeness_score', 50))))
-            testability = max(0, min(100, int(qa.get('testability_score', 50))))
-            overall = max(0, min(100, int(qa.get('overall_score', 50))))
+            # Document-level scores are the average of the per-requirement scores.
+            n = len(requirements)
+            clarity = round(sum(r['clarity_score'] for r in requirements) / n)
+            completeness = round(sum(r['completeness_score'] for r in requirements) / n)
+            testability = round(sum(r['testability_score'] for r in requirements) / n)
+            overall = round(sum(r['overall_score'] for r in requirements) / n)
+            severity = sev(overall)
 
-            if overall >= 80:
-                severity = 'Low'
-            elif overall >= 60:
-                severity = 'Medium'
-            else:
-                severity = 'High'
-
+            default_ref = requirements[0]['requirement_id']
             conditions = []
             for c in data.get('test_conditions', []):
                 if isinstance(c, dict):
                     conditions.append({
                         'condition_id': str(c.get('condition_id', '')),
+                        'requirement_ref': str(c.get('requirement_ref', default_ref)),
                         'description': str(c.get('description', '')),
                         'type': str(c.get('type', 'Positive')),
                         'priority': str(c.get('priority', 'Medium')),
@@ -153,7 +201,7 @@ class QAAnalyzer:
                     t = 'positive'
                 scenarios.append({
                     'id': str(s.get('scenario_id', '')),
-                    'requirement_ref': str(s.get('requirement_ref', 'REQ-001')),
+                    'requirement_ref': str(s.get('requirement_ref', default_ref)),
                     'condition_ref': str(s.get('condition_ref', '')),
                     'description': str(s.get('description', '')),
                     'preconditions': str(s.get('preconditions', '')),
@@ -164,16 +212,7 @@ class QAAnalyzer:
                 })
 
             return {
-                'requirement_info': {
-                    'requirement_id': str(req_info.get('requirement_id', 'REQ-001')),
-                    'actors': list(req_info.get('actors', [])),
-                    'actions': list(req_info.get('actions', [])),
-                    'business_rules': list(req_info.get('business_rules', [])),
-                    'constraints': list(req_info.get('constraints', [])),
-                    'validation_rules': list(req_info.get('validation_rules', [])),
-                    'error_handling': list(req_info.get('error_handling', [])),
-                    'non_functional': list(req_info.get('non_functional', [])),
-                },
+                'requirements': requirements,
                 'quality_assessment': {
                     'clarity_score': clarity,
                     'completeness_score': completeness,
@@ -195,12 +234,14 @@ class QAAnalyzer:
 
     def _default_error(self) -> dict:
         return {
-            'requirement_info': {
-                'requirement_id': 'REQ-001',
+            'requirements': [{
+                'requirement_id': 'REQ-001', 'title': '',
+                'clarity_score': 0, 'completeness_score': 0, 'testability_score': 0,
+                'overall_score': 0, 'severity': 'High',
                 'actors': [], 'actions': [], 'business_rules': [],
                 'constraints': [], 'validation_rules': [],
                 'error_handling': [], 'non_functional': [],
-            },
+            }],
             'quality_assessment': {
                 'clarity_score': 0, 'completeness_score': 0,
                 'testability_score': 0, 'overall_score': 0,

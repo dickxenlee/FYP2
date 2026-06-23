@@ -20,7 +20,8 @@ class TrainingDataManager:
         Saves a complete Phase 3 QA session — all six sections.
         Returns the saved AnalysisSession object.
         """
-        req_info = qa_result.get('requirement_info', {})
+        requirements = qa_result.get('requirements', [])
+        first_req_id = requirements[0]['requirement_id'] if requirements else 'REQ-001'
         qa = qa_result.get('quality_assessment', {})
 
         first_line = requirements_text.strip().split('\n')[0]
@@ -32,8 +33,8 @@ class TrainingDataManager:
             requirements_text=requirements_text,
             suggested_requirement=qa_result.get('suggested_requirement', ''),
             accuracy_score=qa.get('overall_score', 0),
-            requirement_id=req_info.get('requirement_id', 'REQ-001'),
-            extracted_info=json.dumps(req_info),
+            requirement_id=first_req_id,
+            extracted_info=json.dumps({'requirements': requirements}),
             clarity_score=qa.get('clarity_score', 0),
             completeness_score=qa.get('completeness_score', 0),
             testability_score=qa.get('testability_score', 0),
@@ -55,6 +56,7 @@ class TrainingDataManager:
             TestCondition.objects.create(
                 session=session,
                 condition_id=c.get('condition_id', ''),
+                requirement_ref=c.get('requirement_ref', ''),
                 description=c.get('description', ''),
                 condition_type=c.get('type', 'Positive'),
                 priority=c.get('priority', 'Medium'),
@@ -104,6 +106,7 @@ class TrainingDataManager:
                     defaults={
                         'test_data': case.get('test_data', ''),
                         'steps_json': json.dumps(case.get('steps', [])),
+                        'steps_done': '[]',  # reset checkboxes when (re)generated
                         'expected_results': case.get('expected_results', ''),
                         'postconditions': case.get('postconditions', ''),
                     },
@@ -121,12 +124,13 @@ class TrainingDataManager:
 
     def _reanalyze_session_inner(self, session, qa_result: dict):
         qa = qa_result['quality_assessment']
-        req_info = qa_result['requirement_info']
+        requirements = qa_result.get('requirements', [])
+        first_req_id = requirements[0]['requirement_id'] if requirements else 'REQ-001'
 
         session.accuracy_score = qa['overall_score']
         session.suggested_requirement = qa_result.get('suggested_requirement', '')
-        session.requirement_id = req_info.get('requirement_id', 'REQ-001')
-        session.extracted_info = json.dumps(req_info)
+        session.requirement_id = first_req_id
+        session.extracted_info = json.dumps({'requirements': requirements})
         session.clarity_score = qa['clarity_score']
         session.completeness_score = qa['completeness_score']
         session.testability_score = qa['testability_score']
@@ -146,6 +150,7 @@ class TrainingDataManager:
             TestCondition.objects.create(
                 session=session,
                 condition_id=c.get('condition_id', ''),
+                requirement_ref=c.get('requirement_ref', ''),
                 description=c.get('description', ''),
                 condition_type=c.get('type', 'Positive'),
                 priority=c.get('priority', 'Medium'),
@@ -171,79 +176,4 @@ class TrainingDataManager:
                 scenario_type=s.get('type', 'positive'),
                 priority=s.get('priority', 'Medium'),
             )
-        return session
-
-    # ── Phase 2 legacy methods (kept for confirm_view backward compat) ────
-
-    def save_interaction(self, user, requirements_text: str,
-                         analysis_result: dict, scenarios: list) -> AnalysisSession:
-        first_line = requirements_text.strip().split('\n')[0]
-        title = first_line[:80] if first_line else 'Analysis Session'
-
-        session = AnalysisSession.objects.create(
-            user=user,
-            title=title,
-            requirements_text=requirements_text,
-            accuracy_score=analysis_result.get('score', 0),
-            suggested_requirement='',
-        )
-
-        for item in analysis_result.get('feedback', []):
-            FeedbackItem.objects.create(
-                session=session,
-                feedback_type=item.get('type', 'warning'),
-                message=item.get('message', ''),
-            )
-
-        for s in scenarios:
-            TestScenario.objects.create(
-                session=session,
-                scenario_id=s.get('id', ''),
-                description=s.get('description', ''),
-                preconditions=s.get('preconditions', ''),
-                steps_json=json.dumps(s.get('steps', [])),
-                expected_result=s.get('expected_result', ''),
-                scenario_type=s.get('type', 'positive'),
-            )
-
-        return session
-
-    def save_partial_session(self, user, requirements_text: str,
-                             analysis_result: dict,
-                             suggested_requirement: str = '') -> AnalysisSession:
-        first_line = requirements_text.strip().split('\n')[0]
-        title = first_line[:80] if first_line else 'Analysis Session'
-
-        session = AnalysisSession.objects.create(
-            user=user,
-            title=title,
-            requirements_text=requirements_text,
-            accuracy_score=analysis_result.get('score', 0),
-            suggested_requirement=suggested_requirement,
-        )
-
-        for item in analysis_result.get('feedback', []):
-            FeedbackItem.objects.create(
-                session=session,
-                feedback_type=item.get('type', 'warning'),
-                message=item.get('message', ''),
-            )
-
-        return session
-
-    def add_scenarios_to_session(self, session_id: int,
-                                 scenarios: list) -> AnalysisSession:
-        session = AnalysisSession.objects.get(id=session_id)
-
-        for s in scenarios:
-            TestScenario.objects.create(
-                session=session,
-                scenario_id=s.get('id', ''),
-                description=s.get('description', ''),
-                preconditions=s.get('preconditions', ''),
-                steps_json=json.dumps(s.get('steps', [])),
-                expected_result=s.get('expected_result', ''),
-                scenario_type=s.get('type', 'positive'),
-            )
-
         return session

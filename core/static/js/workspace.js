@@ -24,6 +24,7 @@ const toggleSidebarBtn  = document.getElementById('toggleSidebar');
 const newSessionBtn     = document.getElementById('newSession');
 const csrfToken         = document.getElementById('csrfToken').value;
 const workspaceId       = (document.getElementById('workspaceId') || {}).value || '';
+const canDeleteChats    = ((document.getElementById('canDeleteChats') || {}).value || '1') === '1';
 
 let currentSessionId = null;
 
@@ -328,6 +329,7 @@ function handleDeleteItem(sessionId, itemEl) {
     })
     .then(function (res) { return res.json(); })
     .then(function (data) {
+        if (data.error) { showToast(data.error, 'error'); return; }
         if (data.system_action !== 'chat_deleted') return;
         if (itemEl) itemEl.remove();
         if (historyList.querySelectorAll('.history-item').length === 0) {
@@ -417,8 +419,8 @@ function appendAnalysisResult(data) {
     block.className = 'qa-report';
     var html = '';
 
-    if (data.requirement_info) {
-        html += buildRequirementInfoSection(data.requirement_info);
+    if (data.requirements && data.requirements.length > 0) {
+        html += buildRequirementsSection(data.requirements);
     }
     if (data.test_conditions && data.test_conditions.length > 0) {
         html += buildTestConditionsSection(data.test_conditions);
@@ -463,12 +465,20 @@ function appendAnalysisResult(data) {
     chatMessages.appendChild(block);
     scrollToBottom();
 
-    // Section 6 button
+    // Section 6 button + any already-saved detailed cases (with per-step checkboxes)
     var detailBtn = block.querySelector('.btn-generate-detailed');
     if (detailBtn) {
         detailBtn.addEventListener('click', function () {
             handleGenerateDetailedCases(data.session_id, block);
         });
+    }
+    if (data.detailed_cases && data.detailed_cases.length > 0) {
+        var dContainer = block.querySelector('.detailed-cases-container');
+        if (dContainer) {
+            dContainer.innerHTML = buildDetailedCasesHtml(data.detailed_cases);
+            attachDetailedStepHandlers(dContainer);
+        }
+        if (detailBtn) detailBtn.innerHTML = '&#8635;&nbsp; Regenerate Detailed Test Cases';
     }
 
     // Re-analyze button
@@ -490,14 +500,14 @@ function appendAnalysisResult(data) {
     // Editable output fields
     attachEditableHandlers(block);
 
-    // Rating buttons
-    attachRatingHandlers(block);
+    // Scenario "done" checkboxes
+    attachScenarioDoneHandlers(block);
 }
 
 
 // ── Section builders ──────────────────────────
 
-function buildRequirementInfoSection(info) {
+function buildRequirementsSection(requirements) {
     var fields = [
         { label: 'Actors',                      key: 'actors' },
         { label: 'Actions',                     key: 'actions' },
@@ -508,22 +518,40 @@ function buildRequirementInfoSection(info) {
         { label: 'Non-Functional Requirements', key: 'non_functional' },
     ];
     var html = '<div class="qa-section">';
-    html += '<div class="qa-section-header"><span class="section-num">1</span>Requirement Analysis</div>';
-    html += '<div style="padding:0.8rem 1rem 0.2rem;">';
-    html += '<span class="req-id-badge">&#128196;&nbsp; ' + escapeHtml(info.requirement_id || 'REQ-001') + '</span>';
-    html += '</div><div class="req-info-grid">';
-    fields.forEach(function (field) {
-        var items = info[field.key] || [];
-        if (items.length === 0) return;
-        html += '<div class="req-info-row">';
-        html += '<div class="req-info-label">' + field.label + '</div>';
-        html += '<ul class="req-info-list">';
-        items.forEach(function (item) {
-            html += '<li>' + escapeHtml(String(item)) + '</li>';
+    html += '<div class="qa-section-header"><span class="section-num">1</span>Requirement Analysis';
+    if (requirements.length > 1) {
+        html += '<span class="edit-hint">' + requirements.length + ' requirements found</span>';
+    }
+    html += '</div>';
+
+    requirements.forEach(function (info) {
+        html += '<div class="req-block">';
+        html += '<div style="padding:0.8rem 1rem 0.2rem;">';
+        html += '<span class="req-id-badge">&#128196;&nbsp; ' + escapeHtml(info.requirement_id || 'REQ-001') + '</span>';
+        if (info.title) html += ' <span class="req-title">' + escapeHtml(info.title) + '</span>';
+        if (typeof info.overall_score === 'number') {
+            var sevCls = (info.severity || 'Medium').toLowerCase();
+            html += '<div class="req-scores">Clarity ' + info.clarity_score + '% &middot; Completeness ' +
+                info.completeness_score + '% &middot; Testability ' + info.testability_score +
+                '% &middot; <strong>Overall ' + info.overall_score + '%</strong> ' +
+                '<span class="req-sev req-sev-' + sevCls + '">' + escapeHtml(info.severity || 'Medium') + '</span></div>';
+        }
+        html += '</div><div class="req-info-grid">';
+        fields.forEach(function (field) {
+            var items = info[field.key] || [];
+            if (items.length === 0) return;
+            html += '<div class="req-info-row">';
+            html += '<div class="req-info-label">' + field.label + '</div>';
+            html += '<ul class="req-info-list">';
+            items.forEach(function (item) {
+                html += '<li>' + escapeHtml(String(item)) + '</li>';
+            });
+            html += '</ul></div>';
         });
-        html += '</ul></div>';
+        html += '</div></div>';
     });
-    html += '</div></div>';
+
+    html += '</div>';
     return html;
 }
 
@@ -532,7 +560,7 @@ function buildTestConditionsSection(conditions) {
     html += '<div class="qa-section-header"><span class="section-num">2</span>Test Conditions';
     html += '<span class="edit-hint">&#9998; click a cell to edit</span></div>';
     html += '<div class="qa-table-wrapper"><table class="qa-table"><thead><tr>';
-    html += '<th>Condition ID</th><th>Test Condition</th><th>Type</th><th>Priority</th>';
+    html += '<th>Condition ID</th><th>Req</th><th>Test Condition</th><th>Type</th><th>Priority</th>';
     html += '</tr></thead><tbody>';
 
     conditions.forEach(function (c) {
@@ -541,6 +569,7 @@ function buildTestConditionsSection(conditions) {
         var dbId     = c.db_id || '';
         html += '<tr>';
         html += '<td><strong>' + escapeHtml(c.condition_id) + '</strong></td>';
+        html += '<td><span class="qa-badge badge-ref">' + escapeHtml(c.requirement_ref || '') + '</span></td>';
         html += '<td class="editable-item" contenteditable="true" data-model="condition" data-db-id="' + dbId + '" data-field="description">' + escapeHtml(c.description) + '</td>';
         html += '<td><span class="qa-badge badge-type-' + typeSlug + '">' + escapeHtml(c.type) + '</span></td>';
         html += '<td><span class="qa-badge badge-priority-' + priSlug + '">' + escapeHtml(c.priority) + '</span></td>';
@@ -634,17 +663,15 @@ function buildTestScenariosSection(scenarios) {
     html += '<div class="qa-section-header"><span class="section-num">5</span>Traceable Test Scenarios';
     html += '<span class="edit-hint">&#9998; click a cell to edit &mdash; &#128190; to save row</span></div>';
     html += '<div class="qa-table-wrapper"><table class="qa-table"><thead><tr>';
-    html += '<th>ID</th><th>Req</th><th>Cond</th><th>Description</th><th>Preconditions</th><th>Expected Result</th><th>Priority</th><th>Rating</th><th></th>';
+    html += '<th>ID</th><th>Req</th><th>Cond</th><th>Description</th><th>Preconditions</th><th>Expected Result</th><th>Priority</th><th>Done</th><th></th>';
     html += '</tr></thead><tbody>';
 
     scenarios.forEach(function (s) {
-        var priSlug   = (s.priority || 'medium').toLowerCase();
-        var dbId      = s.db_id || '';
-        var rating    = s.user_rating || '';
-        var usefulCls = rating === 'useful'     ? ' rate-active' : '';
-        var notUseCls = rating === 'not_useful' ? ' rate-active' : '';
+        var priSlug = (s.priority || 'medium').toLowerCase();
+        var dbId    = s.db_id || '';
+        var doneCls = s.is_done ? ' scenario-done' : '';
 
-        html += '<tr data-scenario-db-id="' + dbId + '">';
+        html += '<tr data-scenario-db-id="' + dbId + '"' + (s.is_done ? ' class="scenario-done-row"' : '') + '>';
         html += '<td><strong>' + escapeHtml(s.id || s.scenario_id || '') + '</strong></td>';
         html += '<td><span class="qa-badge badge-ref">' + escapeHtml(s.requirement_ref || '') + '</span></td>';
         html += '<td><span class="qa-badge badge-ref">' + escapeHtml(s.condition_ref || '') + '</span></td>';
@@ -652,10 +679,9 @@ function buildTestScenariosSection(scenarios) {
         html += '<td class="editable-item text-muted" contenteditable="true" data-model="scenario" data-db-id="' + dbId + '" data-field="preconditions">' + escapeHtml(s.preconditions) + '</td>';
         html += '<td class="editable-item" contenteditable="true" data-model="scenario" data-db-id="' + dbId + '" data-field="expected_result">' + escapeHtml(s.expected_result) + '</td>';
         html += '<td><span class="qa-badge badge-priority-' + priSlug + '">' + escapeHtml(s.priority || 'Medium') + '</span></td>';
-        html += '<td class="rating-cell">';
+        html += '<td class="done-cell">';
         if (dbId) {
-            html += '<button class="btn-rate' + usefulCls + '" data-db-id="' + dbId + '" data-rating="useful" title="Useful">&#128077;</button>';
-            html += '<button class="btn-rate' + notUseCls + '" data-db-id="' + dbId + '" data-rating="not_useful" title="Not useful">&#128078;</button>';
+            html += '<input type="checkbox" class="scenario-done-input" data-db-id="' + dbId + '"' + (s.is_done ? ' checked' : '') + ' title="Mark this scenario as done">';
         }
         html += '</td>';
         html += '<td><button class="btn-save-row" data-db-id="' + dbId + '" title="Save this row">&#128190;</button></td>';
@@ -683,7 +709,17 @@ function handleGenerateDetailedCases(sessionId, reportBlock) {
     })
     .then(function (res) { return res.json(); })
     .then(function (data) {
-        if (container) container.innerHTML = buildDetailedCasesHtml(data.detailed_cases);
+        if (data.error) {
+            if (container) container.innerHTML =
+                '<span style="color:#e74c3c;padding:0.5rem 1rem;display:block;">' + escapeHtml(data.error) + '</span>';
+            if (btn) btn.disabled = false;
+            return;
+        }
+        if (container) {
+            container.innerHTML = buildDetailedCasesHtml(data.detailed_cases);
+            attachDetailedStepHandlers(container);
+        }
+        if (btn) { btn.disabled = false; btn.innerHTML = '&#8635;&nbsp; Regenerate Detailed Test Cases'; }
     })
     .catch(function (err) {
         if (container) container.innerHTML =
@@ -695,12 +731,26 @@ function handleGenerateDetailedCases(sessionId, reportBlock) {
 function buildDetailedCasesHtml(cases) {
     if (!cases || cases.length === 0) return '<p class="text-muted" style="padding:0.5rem 1rem;">No detailed cases generated.</p>';
     return cases.map(function (c) {
+        var steps = c.steps || [];
+        var done  = c.steps_done || [];
+        var doneCount = done.filter(Boolean).length;
         var card = '<div class="detailed-case-card">';
-        card += '<div class="detailed-case-id">&#128196;&nbsp; ' + escapeHtml(c.scenario_id) + '</div>';
+        card += '<div class="detailed-case-id">&#128196;&nbsp; ' + escapeHtml(c.scenario_id);
+        if (steps.length > 0) {
+            card += ' <span class="step-progress">' + doneCount + '/' + steps.length + ' done</span>';
+        }
+        card += '</div>';
         if (c.test_data) card += detailRow('Test Data', escapeHtml(c.test_data));
-        if (c.steps && c.steps.length > 0) {
-            var stepsHtml = '<ol style="margin:0;padding-left:1.2rem;">' +
-                c.steps.map(function (s) { return '<li>' + escapeHtml(s) + '</li>'; }).join('') + '</ol>';
+        if (steps.length > 0) {
+            var stepsHtml = '<div class="step-list">';
+            steps.forEach(function (step, i) {
+                var isDone = !!done[i];
+                stepsHtml += '<label class="step-check' + (isDone ? ' step-done' : '') + '">' +
+                    '<input type="checkbox" class="step-check-input" data-case-id="' + c.db_id +
+                    '" data-step-index="' + i + '"' + (isDone ? ' checked' : '') + '>' +
+                    '<span>' + (i + 1) + '. ' + escapeHtml(step) + '</span></label>';
+            });
+            stepsHtml += '</div>';
             card += detailRow('Test Steps', stepsHtml, true);
         }
         if (c.expected_results) card += detailRow('Expected Results', escapeHtml(c.expected_results));
@@ -708,6 +758,33 @@ function buildDetailedCasesHtml(cases) {
         card += '</div>';
         return card;
     }).join('');
+}
+
+// Per-step "done" checkboxes — saved to the DB and shared with the team.
+function attachDetailedStepHandlers(scope) {
+    scope.querySelectorAll('.step-check-input').forEach(function (cb) {
+        cb.addEventListener('change', function () {
+            toggleStepDone(parseInt(cb.dataset.caseId), parseInt(cb.dataset.stepIndex), cb);
+        });
+    });
+}
+
+function toggleStepDone(caseId, stepIndex, cb) {
+    fetch('/toggle_step_done/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify({ case_id: caseId, step_index: stepIndex }),
+    })
+    .then(function (res) { return res.json(); })
+    .then(function (data) {
+        if (data.error) { showToast(data.error, 'error'); cb.checked = !cb.checked; return; }
+        var label = cb.closest('.step-check');
+        if (label) label.classList.toggle('step-done', cb.checked);
+        var card = cb.closest('.detailed-case-card');
+        var badge = card && card.querySelector('.step-progress');
+        if (badge) badge.textContent = data.done_count + '/' + data.total + ' done';
+    })
+    .catch(function (err) { showToast('Save failed: ' + err.message, 'error'); cb.checked = !cb.checked; });
 }
 
 function detailRow(label, content, isHtml) {
@@ -808,6 +885,9 @@ function buildHistoryItem(sessionId, title, scoreColor, score, active) {
     var li = document.createElement('li');
     li.className = 'history-item' + (active ? ' active' : '');
     li.dataset.sessionId = sessionId;
+    var deleteOption = canDeleteChats
+        ? '<button class="menu-option btn-delete-item">&#128465;&nbsp; Delete</button>'
+        : '';
     li.innerHTML =
         '<span class="history-title">' + escapeHtml(title) + '</span>' +
         '<div class="history-item-right">' +
@@ -817,7 +897,7 @@ function buildHistoryItem(sessionId, title, scoreColor, score, active) {
         '<div class="item-menu-dropdown">' +
         '<button class="menu-option btn-pin-item">&#128204;&nbsp; Pin</button>' +
         '<button class="menu-option btn-rename-item">&#9998;&nbsp; Rename</button>' +
-        '<button class="menu-option btn-delete-item">&#128465;&nbsp; Delete</button>' +
+        deleteOption +
         '</div></div></div>';
     return li;
 }
@@ -896,36 +976,32 @@ function handleReanalyze(sessionId) {
 
 
 // ─────────────────────────────────────────────
-// Scenario rating
+// Scenario "done" checkboxes — saved to the DB and shared with the team
 // ─────────────────────────────────────────────
-function attachRatingHandlers(block) {
-    block.querySelectorAll('.btn-rate').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-            var dbId   = parseInt(btn.dataset.dbId);
-            var rating = btn.dataset.rating;
+function attachScenarioDoneHandlers(block) {
+    block.querySelectorAll('.scenario-done-input').forEach(function (cb) {
+        cb.addEventListener('change', function () {
+            var dbId = parseInt(cb.dataset.dbId);
             if (!dbId) return;
-            handleRateScenario(dbId, rating, btn.closest('tr'));
+            toggleScenarioDone(dbId, cb);
         });
     });
 }
 
-function handleRateScenario(dbId, rating, rowEl) {
-    fetch('/rate_scenario/', {
+function toggleScenarioDone(dbId, cb) {
+    fetch('/toggle_scenario_done/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-        body: JSON.stringify({ db_id: dbId, rating: rating }),
+        body: JSON.stringify({ db_id: dbId }),
     })
     .then(function (res) { return res.json(); })
     .then(function (data) {
-        if (!rowEl) return;
-        var usefulBtn    = rowEl.querySelector('.btn-rate[data-rating="useful"]');
-        var notUsefulBtn = rowEl.querySelector('.btn-rate[data-rating="not_useful"]');
-        if (usefulBtn)    usefulBtn.classList.toggle('rate-active', data.rating === 'useful');
-        if (notUsefulBtn) notUsefulBtn.classList.toggle('rate-active', data.rating === 'not_useful');
-        var label = data.rating === 'useful' ? 'Marked useful' : data.rating === 'not_useful' ? 'Marked not useful' : 'Rating cleared';
-        showToast(label, 'info');
+        if (data.error) { showToast(data.error, 'error'); cb.checked = !cb.checked; return; }
+        var row = cb.closest('tr');
+        if (row) row.classList.toggle('scenario-done-row', data.is_done);
+        showToast(data.is_done ? 'Marked done' : 'Marked not done', 'info');
     })
-    .catch(function (err) { showToast('Rating failed: ' + err.message, 'error'); });
+    .catch(function (err) { showToast('Save failed: ' + err.message, 'error'); cb.checked = !cb.checked; });
 }
 
 
@@ -1038,6 +1114,211 @@ function pollWorkspaceState() {
         .catch(function () { /* transient network error — ignore, try again next tick */ });
 }
 
-if (workspaceId) {
-    setInterval(pollWorkspaceState, 8000);
+// ─────────────────────────────────────────────
+// Live "My Team Workspaces" sidebar list
+// Rebuilds the list so newly created/joined workspaces and changing member
+// counts appear without a page reload. Runs in both personal and workspace views.
+// ─────────────────────────────────────────────
+function buildWsListItem(ws) {
+    var li = document.createElement('li');
+    li.className = 'ws-list-item' + (ws.workspace_id === workspaceId ? ' active' : '');
+    var name = ws.name.length > 20 ? ws.name.substring(0, 20) + '…' : ws.name;
+    li.innerHTML =
+        '<a href="/workspace/' + encodeURIComponent(ws.workspace_id) + '/">' +
+        '<span class="ws-list-icon">&#127962;</span>' +
+        '<span class="ws-list-name">' + escapeHtml(name) + '</span>' +
+        '<span class="ws-list-members">&#128101; ' + ws.member_count + '</span>' +
+        '<span class="ws-list-badge">' + escapeHtml(ws.workspace_id) + '</span>' +
+        '</a>';
+    return li;
 }
+
+function pollMyWorkspaces() {
+    if (document.hidden) return;
+
+    fetch('/workspaces/state/')
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (data) {
+            if (!data || !data.workspaces) return;
+            var list = document.getElementById('myWorkspacesList');
+            if (!list) return;
+
+            list.innerHTML = '';
+            if (data.workspaces.length === 0) {
+                list.innerHTML = '<li class="ws-empty">No team workspaces yet.</li>';
+                return;
+            }
+            data.workspaces.forEach(function (ws) {
+                list.appendChild(buildWsListItem(ws));
+            });
+        })
+        .catch(function () { /* transient network error — ignore, retry next tick */ });
+}
+
+// Live-refresh the open session's team notes so a teammate's edits appear
+// without a reload. Skips while you are typing in the box (so it never
+// overwrites your own unsaved text).
+function pollTeamNotes() {
+    if (!workspaceId || !currentSessionId || document.hidden) return;
+    var area = document.querySelector('.team-notes-area[data-session-id="' + currentSessionId + '"]');
+    if (!area || area === document.activeElement) return;
+
+    fetch('/session/' + currentSessionId + '/notes/')
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (data) {
+            if (!data) return;
+            var incoming = data.team_notes || '';
+            if (incoming !== area.value && area !== document.activeElement) {
+                area.value = incoming;
+            }
+        })
+        .catch(function () { /* transient error — try again next tick */ });
+}
+
+// ─────────────────────────────────────────────
+// Team input draft — members contribute, owner generates
+// Members type into their own box (auto-saved); everyone's text shows in a
+// combined preview color-coded by author. Only the owner sees Generate.
+// ─────────────────────────────────────────────
+var DRAFT_COLORS = ['#5dade2', '#e67e22', '#2ecc71', '#af7ac5', '#ec7063', '#48c9b0', '#f4d03f', '#ec8fd0'];
+function draftColorFor(name) {
+    var h = 0;
+    for (var i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+    return DRAFT_COLORS[h % DRAFT_COLORS.length];
+}
+
+var myDraftInput     = document.getElementById('myDraftInput');
+var draftSavedHint   = document.getElementById('draftSavedHint');
+var teamDraftPreview = document.getElementById('teamDraftPreview');
+var generateDraftBtn = document.getElementById('generateFromDraftBtn');
+
+function renderTeamDraft(data) {
+    if (!teamDraftPreview || !data.inputs) return;
+    // Don't redraw while a teammate's box is being edited here (avoids clobber).
+    if (teamDraftPreview.contains(document.activeElement)) return;
+
+    var withText = data.inputs.filter(function (it) { return (it.text || '').trim(); });
+    if (!withText.length) {
+        teamDraftPreview.innerHTML = '<span class="ti-empty">No input yet.</span>';
+    } else {
+        teamDraftPreview.innerHTML = withText.map(function (it) {
+            var col = draftColorFor(it.username);
+            var name = '<div class="ti-author" style="color:' + col + '">' +
+                escapeHtml(it.username) + (it.is_me ? ' (you)' : '') + '</div>';
+            if (it.is_me) {
+                // Your own input is edited via the "Your input" box on the left.
+                return '<div class="ti-contribution">' + name +
+                    '<div class="ti-text" style="color:' + col + '">' + escapeHtml(it.text) + '</div></div>';
+            }
+            // Any member can edit a teammate's input inline.
+            return '<div class="ti-contribution">' + name +
+                '<textarea class="ti-edit-other" data-username="' + escapeHtml(it.username) +
+                '" style="color:' + col + '" rows="2">' + escapeHtml(it.text) + '</textarea></div>';
+        }).join('');
+
+        teamDraftPreview.querySelectorAll('.ti-edit-other').forEach(function (ta) {
+            ta.addEventListener('blur', function () {
+                saveOtherDraft(ta.dataset.username, ta.value);
+            });
+        });
+    }
+    // Keep my own box in sync across devices, but never while I'm typing.
+    if (myDraftInput && myDraftInput !== document.activeElement) {
+        var mine = data.inputs.filter(function (it) { return it.is_me; })[0];
+        var mineText = mine ? (mine.text || '') : '';
+        if (mineText !== myDraftInput.value) myDraftInput.value = mineText;
+    }
+}
+
+function saveOtherDraft(username, text) {
+    fetch('/workspace/' + workspaceId + '/draft/save/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify({ username: username, text: text }),
+    })
+    .then(function (res) { return res.json(); })
+    .then(function (data) {
+        if (data.error) { showToast(data.error, 'error'); return; }
+        showToast("Updated " + username + "'s input", 'info');
+    })
+    .catch(function (err) { showToast('Save failed: ' + err.message, 'error'); });
+}
+
+function pollTeamDraft() {
+    if (!workspaceId || document.hidden || !teamDraftPreview) return;
+    fetch('/workspace/' + workspaceId + '/draft/')
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (data) { if (data) renderTeamDraft(data); })
+        .catch(function () { /* transient error — retry next tick */ });
+}
+
+function saveMyDraft() {
+    if (!myDraftInput) return;
+    fetch('/workspace/' + workspaceId + '/draft/save/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify({ text: myDraftInput.value }),
+    })
+    .then(function (res) { return res.json(); })
+    .then(function () {
+        if (draftSavedHint) {
+            draftSavedHint.textContent = '✓ Saved';
+            setTimeout(function () { draftSavedHint.textContent = ''; }, 1500);
+        }
+    })
+    .catch(function () { /* ignore; will save again on next edit */ });
+}
+
+if (myDraftInput) {
+    var draftTimer = null;
+    myDraftInput.addEventListener('input', function () {
+        if (draftTimer) clearTimeout(draftTimer);
+        draftTimer = setTimeout(saveMyDraft, 800);
+    });
+    myDraftInput.addEventListener('blur', saveMyDraft);
+    pollTeamDraft();  // initial load: show my saved text + teammates' input
+}
+
+if (generateDraftBtn) {
+    generateDraftBtn.addEventListener('click', function () {
+        generateDraftBtn.disabled = true;
+        var welcome = document.getElementById('welcomeMsg');
+        if (welcome) welcome.remove();
+        var loadingEl = appendLoading();
+        fetch('/workspace/' + workspaceId + '/draft/generate/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+            body: JSON.stringify({}),
+        })
+        .then(function (res) {
+            if (!res.ok) return res.json().then(function (e) { throw new Error(e.error || 'Server error'); });
+            return res.json();
+        })
+        .then(function (data) {
+            loadingEl.remove();
+            appendUserMessage(data.requirements_text);
+            if (data.requires_user_decision && data.suggested_requirement) {
+                appendSuggestionConfirmBox(data);
+            } else {
+                currentSessionId = data.session_id;
+                addSessionToHistory(data);
+                appendAnalysisResult(data);
+            }
+        })
+        .catch(function (err) {
+            loadingEl.remove();
+            appendErrorMessage('Error: ' + err.message);
+        })
+        .finally(function () { generateDraftBtn.disabled = false; });
+    });
+}
+
+function pollAll() {
+    pollWorkspaceState();   // self-guards: returns early outside a workspace
+    pollMyWorkspaces();
+    pollTeamNotes();        // self-guards: only in a workspace with an open session
+    pollTeamDraft();        // self-guards: only in a workspace with the input panel
+}
+
+setInterval(pollAll, 8000);
+pollMyWorkspaces();
