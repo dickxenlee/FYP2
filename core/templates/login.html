@@ -11,7 +11,6 @@
     </div>
     <ul class="navbar-links">
         <li><a href="{% url 'home' %}">Home</a></li>
-        <li><a href="{% url 'about' %}">About Us</a></li>
         <li><a href="{% url 'login' %}" class="btn btn-outline active">Sign In</a></li>
         <li><a href="{% url 'register' %}" class="btn btn-primary">Register</a></li>
     </ul>
@@ -37,12 +36,19 @@
             </div>
             <div class="form-group">
                 <label for="id_password">Password</label>
-                <input type="password" id="id_password" name="password"
-                       placeholder="Password" required>
+                <div class="password-wrapper">
+                    <input type="password" id="id_password" name="password"
+                           placeholder="Password" required>
+                    {% include 'partials/_password_toggle.html' with target='id_password' %}
+                </div>
             </div>
             <button type="submit" class="btn btn-submit">Sign In</button>
         </form>
         <p class="auth-switch">Don't have an account? <a href="{% url 'register' %}">Register</a></p>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/auth.js' %}?v=2"></script>
 {% endblock %}

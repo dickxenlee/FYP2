@@ -28,6 +28,11 @@ const canDeleteChats    = ((document.getElementById('canDeleteChats') || {}).val
 
 let currentSessionId = null;
 
+// Live-refresh state for the open session's content.
+let lastContentSig    = null;   // signature of what's currently rendered
+let myLastEditAt      = 0;      // timestamp of my own last edit (suppress self-toast)
+let detailedGenerating = false; // true while I'm generating detailed cases
+
 
 // ─────────────────────────────────────────────
 // Sidebar controls
@@ -417,6 +422,17 @@ function handleGenerateFromEdited(editedText, suggestionBlock) {
 function appendAnalysisResult(data) {
     var block = document.createElement('div');
     block.className = 'qa-report';
+    if (data.session_id) block.dataset.sessionId = data.session_id;
+    populateReport(block, data);
+    chatMessages.appendChild(block);
+    scrollToBottom();
+    lastContentSig = contentSignature(data);
+}
+
+// Build the report HTML into `block` and wire up all of its handlers.
+// Shared by the first render and the live teammate-edit refresh, so a
+// re-render restores every button, checkbox, and editable cell.
+function populateReport(block, data) {
     var html = '';
 
     if (data.requirements && data.requirements.length > 0) {
@@ -462,8 +478,6 @@ function appendAnalysisResult(data) {
     }
 
     block.innerHTML = html;
-    chatMessages.appendChild(block);
-    scrollToBottom();
 
     // Section 6 button + any already-saved detailed cases (with per-step checkboxes)
     var detailBtn = block.querySelector('.btn-generate-detailed');
@@ -502,6 +516,67 @@ function appendAnalysisResult(data) {
 
     // Scenario "done" checkboxes
     attachScenarioDoneHandlers(block);
+}
+
+// A short fingerprint of the open session's editable content. Two renders with
+// the same signature are visually identical, so we only re-render when it
+// changes — avoiding a needless redraw every poll tick. Team notes are excluded
+// (they have their own in-place poll) so notes edits don't trigger a full redraw.
+function contentSignature(data) {
+    try {
+        var p = [];
+        (data.requirements || []).forEach(function (r) {
+            p.push(r.requirement_id, r.clarity_score, r.completeness_score, r.testability_score);
+        });
+        var qa = data.quality_assessment || {};
+        p.push(qa.clarity_score, qa.completeness_score, qa.testability_score, qa.overall_score);
+        (qa.positive_aspects || []).forEach(function (f) { p.push('s', f.text != null ? f.text : f); });
+        (qa.warnings || []).forEach(function (f) { p.push('w', f.text != null ? f.text : f); });
+        (data.test_conditions || []).forEach(function (c) { p.push(c.db_id, c.description, c.type, c.priority); });
+        (data.gaps || []).forEach(function (g) { p.push(g.db_id, g.description, g.suggested_clarification); });
+        (data.scenarios || []).forEach(function (s) {
+            p.push(s.db_id, s.description, s.preconditions, s.expected_result, s.priority, s.is_done ? 1 : 0);
+        });
+        (data.detailed_cases || []).forEach(function (dc) { p.push('d', dc.db_id, (dc.steps_done || []).join(',')); });
+        return p.join('|');
+    } catch (e) {
+        return String(Math.random());  // on any oddity, force a refresh
+    }
+}
+
+// Re-render the open report in place, keeping the user's scroll position.
+function refreshReportBlock(block, data) {
+    var prevScroll = chatMessages.scrollTop;
+    populateReport(block, data);
+    chatMessages.scrollTop = prevScroll;
+}
+
+// Poll the open session and re-render it when a teammate changed its content.
+// Skips entirely while you are editing inside it or while something is loading,
+// so it never interrupts your own work.
+function pollSessionContent() {
+    if (!workspaceId || !currentSessionId || document.hidden) return;
+    if (detailedGenerating) return;
+    if (chatMessages.querySelector('.loading-block')) return;  // a generation is in flight
+
+    var block = chatMessages.querySelector('.qa-report[data-session-id="' + currentSessionId + '"]');
+    if (!block) return;
+    if (block.contains(document.activeElement)) return;        // you are editing — don't touch
+
+    fetch('/workspace/session/' + currentSessionId + '/')
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (data) {
+            if (!data) return;
+            var sig = contentSignature(data);
+            if (sig === lastContentSig) return;                // nothing changed
+            refreshReportBlock(block, data);
+            lastContentSig = sig;
+            // Only announce when it wasn't my own recent edit echoing back.
+            if (Date.now() - myLastEditAt > 10000) {
+                showToast('Updated with teammate changes', 'info');
+            }
+        })
+        .catch(function () { /* transient error — retry next tick */ });
 }
 
 
@@ -699,6 +774,7 @@ function handleGenerateDetailedCases(sessionId, reportBlock) {
     var btn       = reportBlock.querySelector('.btn-generate-detailed');
     var container = reportBlock.querySelector('.detailed-cases-container');
     if (btn) btn.disabled = true;
+    detailedGenerating = true;  // pause the live-refresh poll while we build these
     if (container) container.innerHTML =
         '<p style="padding:0.5rem 1rem;font-size:0.83rem;color:var(--color-muted);">Generating detailed test cases…</p>';
 
@@ -720,12 +796,15 @@ function handleGenerateDetailedCases(sessionId, reportBlock) {
             attachDetailedStepHandlers(container);
         }
         if (btn) { btn.disabled = false; btn.innerHTML = '&#8635;&nbsp; Regenerate Detailed Test Cases'; }
+        // My own action — let the next poll adopt it quietly (no "teammate" toast).
+        myLastEditAt = Date.now();
     })
     .catch(function (err) {
         if (container) container.innerHTML =
             '<span style="color:#e74c3c;padding:0.5rem 1rem;display:block;">Error: ' + escapeHtml(err.message) + '</span>';
         if (btn) btn.disabled = false;
-    });
+    })
+    .finally(function () { detailedGenerating = false; });
 }
 
 function buildDetailedCasesHtml(cases) {
@@ -778,6 +857,7 @@ function toggleStepDone(caseId, stepIndex, cb) {
     .then(function (res) { return res.json(); })
     .then(function (data) {
         if (data.error) { showToast(data.error, 'error'); cb.checked = !cb.checked; return; }
+        myLastEditAt = Date.now();
         var label = cb.closest('.step-check');
         if (label) label.classList.toggle('step-done', cb.checked);
         var card = cb.closest('.detailed-case-card');
@@ -853,6 +933,7 @@ function saveOutputField(model, dbId, field, value, el) {
     .then(function (res) { return res.json(); })
     .then(function (data) {
         if (data.error) { showToast(data.error, 'error'); return false; }
+        myLastEditAt = Date.now();
         if (el) {
             el.classList.add('save-flash');
             setTimeout(function () { el.classList.remove('save-flash'); }, 1200);
@@ -927,7 +1008,6 @@ function buildExportBarHtml(sessionId) {
         '<span>Export:</span>' +
         '<button class="btn-export btn-pdf" onclick="exportFile(' + sessionId + ', \'pdf\')">PDF</button>' +
         '<button class="btn-export btn-excel" onclick="exportFile(' + sessionId + ', \'excel\')">Excel</button>' +
-        '<button class="btn-export btn-csv" onclick="exportFile(' + sessionId + ', \'csv\')">CSV</button>' +
         '<button class="btn-export btn-reanalyze" data-session-id="' + sessionId + '">&#8635; Re-analyze</button>' +
         '</div>';
 }
@@ -936,7 +1016,6 @@ function exportFile(sessionId, format) {
     var urls = {
         pdf:   '/export/pdf/' + sessionId + '/',
         excel: '/export/excel/' + sessionId + '/',
-        csv:   '/export/csv/' + sessionId + '/',
     };
     window.location.href = urls[format];
 }
@@ -997,6 +1076,7 @@ function toggleScenarioDone(dbId, cb) {
     .then(function (res) { return res.json(); })
     .then(function (data) {
         if (data.error) { showToast(data.error, 'error'); cb.checked = !cb.checked; return; }
+        myLastEditAt = Date.now();
         var row = cb.closest('tr');
         if (row) row.classList.toggle('scenario-done-row', data.is_done);
         showToast(data.is_done ? 'Marked done' : 'Marked not done', 'info');
@@ -1101,6 +1181,32 @@ function pollWorkspaceState() {
                         else historyList.insertBefore(li, historyList.firstChild);
                     }
                 }
+            }
+
+            // 1b. Reconcile existing rows against the server: refresh each score,
+            // and remove any session a teammate deleted (so it can't linger or be
+            // clicked into a 404). A row being renamed inline is left untouched.
+            var serverById = {};
+            (data.sessions || []).forEach(function (s) { serverById[String(s.id)] = s; });
+            historyList.querySelectorAll('.history-item').forEach(function (item) {
+                var s = serverById[String(item.dataset.sessionId)];
+                if (!s) {
+                    if (String(currentSessionId) === String(item.dataset.sessionId)) {
+                        clearChat();
+                        currentSessionId = null;
+                    }
+                    item.remove();
+                    return;
+                }
+                if (item.querySelector('.history-title-input')) return;  // mid-rename
+                var badge = item.querySelector('.history-score');
+                if (badge && badge.textContent !== s.score + '%') {
+                    badge.textContent = s.score + '%';
+                    badge.className = 'history-score score-' + s.color;
+                }
+            });
+            if (!historyList.querySelector('.history-item') && !document.getElementById('historyEmpty')) {
+                historyList.innerHTML = '<li class="history-empty" id="historyEmpty">No history yet.</li>';
             }
 
             // 2. Refresh the member list/count in the collaboration bar.
@@ -1318,6 +1424,7 @@ function pollAll() {
     pollMyWorkspaces();
     pollTeamNotes();        // self-guards: only in a workspace with an open session
     pollTeamDraft();        // self-guards: only in a workspace with the input panel
+    pollSessionContent();   // self-guards: only in a workspace with an open session
 }
 
 setInterval(pollAll, 8000);

@@ -31,7 +31,16 @@ class GeminiService:
 
     def __init__(self):
         genai.configure(api_key=settings.GEMINI_API_KEY)
-        self.model = genai.GenerativeModel('gemini-2.5-flash-lite')
+        # temperature=0 makes the output deterministic, so the same requirement
+        # always returns the same Accuracy Score (reproducible for evaluation).
+        self.model = genai.GenerativeModel(
+            'gemini-2.5-flash-lite',
+            generation_config={'temperature': 0},
+        )
+
+    # Max seconds to wait for one Gemini reply before giving up, so a slow or
+    # frozen API never makes the request hang forever.
+    REQUEST_TIMEOUT = 60
 
     def fetch_response(self, prompt: str) -> str:
         """
@@ -50,7 +59,10 @@ class GeminiService:
 
         for attempt in range(max_retries):
             try:
-                response = self.model.generate_content(prompt)
+                response = self.model.generate_content(
+                    prompt,
+                    request_options={'timeout': self.REQUEST_TIMEOUT},
+                )
                 return response.text
 
             except Exception as e:

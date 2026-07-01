@@ -11,7 +11,6 @@
     </div>
     <ul class="navbar-links">
         <li><a href="{% url 'home' %}" class="active">Home</a></li>
-        <li><a href="{% url 'about' %}">About Us</a></li>
         {% if user.is_authenticated %}
             <li><a href="{% url 'workspace' %}" class="btn btn-outline">Workspace</a></li>
             <li><a href="{% url 'logout' %}" class="btn btn-outline">Sign Out</a></li>
@@ -24,48 +23,69 @@
 
 <main class="hero-section">
     <div class="hero-content">
-        <h1 class="hero-title">Turn Messy Requirements<br>into Perfect Test Cases.</h1>
+        <h1 class="hero-title">Turn Messy Requirements<br>into <span class="hero-accent">Perfect Test Cases.</span></h1>
         <p class="hero-subtitle">
-            The AI-powered assistant designed for Computer Science students
-            and Junior Testers/Developers. Analyze ambiguity, generate scenarios,
-            and export in seconds.
+            Built for Computer Science students and junior testers.
+            Analyze ambiguity, generate test scenarios, and collaborate
+            with your team — all in one place.
         </p>
-        {% if user.is_authenticated %}
-            <a href="{% url 'workspace' %}" class="btn btn-cta">Go to Workspace</a>
-        {% else %}
-            <a href="{% url 'register' %}" class="btn btn-cta">Start Generating</a>
-        {% endif %}
+        <div class="hero-actions">
+            {% if user.is_authenticated %}
+                <a href="{% url 'workspace' %}" class="btn btn-cta">Go to Workspace</a>
+            {% else %}
+                <a href="{% url 'register' %}" class="btn btn-cta">Start Generating</a>
+            {% endif %}
+            <a href="#features" class="btn btn-ghost">Learn more</a>
+        </div>
     </div>
 </main>
 
-<section class="features-section">
+<section class="features-section" id="features">
+    <div class="features-head">
+        <h2 class="section-title">Everything you need to test better</h2>
+        <p class="section-subtitle">From a raw requirement to ready-to-use test cases.</p>
+    </div>
     <div class="features-grid">
         <div class="feature-card">
-            <div class="feature-icon">📊</div>
-            <h3>Quality Score</h3>
-            <p>Get an instant AI-powered accuracy score (0–100%) that evaluates the clarity and completeness of your requirements.</p>
+            <div class="feature-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="7"/>
+                    <path d="m21 21-4.3-4.3"/>
+                </svg>
+            </div>
+            <h3>Requirement Analysis</h3>
+            <p>Analyze your requirements for clarity, ambiguity, and completeness — with an instant AI quality score.</p>
         </div>
         <div class="feature-card">
-            <div class="feature-icon">⚠️</div>
-            <h3>Ambiguity Detection</h3>
-            <p>Identify vague terms, missing information, and inconsistent statements before they cause testing gaps.</p>
+            <div class="feature-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M6 3h9l3 3v15H6z"/>
+                    <path d="M9 9h6M9 13h6M9 17h4"/>
+                </svg>
+            </div>
+            <h3>Test Scenario Generation</h3>
+            <p>Auto-generate positive, negative, and edge test scenarios — then export the full report as PDF or Excel.</p>
         </div>
         <div class="feature-card">
-            <div class="feature-icon">📋</div>
-            <h3>Scenario Generation</h3>
-            <p>Automatically generate positive, negative, and edge case test scenarios with preconditions and step-by-step actions.</p>
-        </div>
-        <div class="feature-card">
-            <div class="feature-icon">📤</div>
-            <h3>Export Results</h3>
-            <p>Download your test scenarios as a PDF report or Excel spreadsheet for use in assignments and projects.</p>
+            <div class="feature-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M16 19a4 4 0 0 0-8 0"/>
+                    <circle cx="12" cy="9" r="3"/>
+                    <path d="M21 19a3.5 3.5 0 0 0-5-3.2"/>
+                    <circle cx="18" cy="8" r="2.2"/>
+                    <path d="M3 19a3.5 3.5 0 0 1 5-3.2"/>
+                    <circle cx="6" cy="8" r="2.2"/>
+                </svg>
+            </div>
+            <h3>Team Collaboration</h3>
+            <p>Work in a shared workspace — write requirements together, generate one analysis, and split the testing as a team.</p>
         </div>
     </div>
 </section>
 
 <footer class="footer">
     <p>&copy; 2026 Multimedia University — FYP Project 823 | Lee Dick Xen (243UC247HK)</p>
-    <p style="font-size:0.75rem; color:#999; margin-top:0.2rem;">
+    <p class="footer-note">
         ⚠ Do not submit sensitive or personally identifiable information (PII) into this system.
     </p>
 </footer>

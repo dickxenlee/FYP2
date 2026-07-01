@@ -23,3 +23,13 @@ db.sqlite3-journal
 .idea/
 .DS_Store
 Thumbs.db
+
+# Academic docs / reports (code-only repo)
+report&presentation/
+Meeting Log*
+_fyp1.txt
+*.docx
+*.pdf
+*.pptx
+~$*
+*.tmp

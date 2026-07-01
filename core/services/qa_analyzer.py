@@ -1,6 +1,7 @@
 import re
 import json
 from .gemini_service import GeminiService
+from .text_preprocessor import TextPreprocessor
 
 QA_ANALYSIS_PROMPT = """
 You are a senior Software Quality Assurance Engineer performing a professional requirements review.
@@ -97,6 +98,7 @@ class QAAnalyzer:
 
     def __init__(self):
         self.llm_client = GeminiService()
+        self.preprocessor = TextPreprocessor()
 
     def analyze(self, requirements_text: str) -> dict:
         """
@@ -104,7 +106,8 @@ class QAAnalyzer:
         requirements (list), quality_assessment, test_conditions, gaps,
         test_scenarios, suggested_requirement.
         """
-        prompt = QA_ANALYSIS_PROMPT.format(requirements_text=requirements_text.strip())
+        clean_text = self.preprocessor.clean(requirements_text)
+        prompt = QA_ANALYSIS_PROMPT.format(requirements_text=clean_text)
         raw = self.llm_client.fetch_response(prompt)
         return self._parse(raw)
 

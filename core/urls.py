@@ -3,7 +3,6 @@ from . import views
 
 urlpatterns = [
     path('', views.home_view, name='home'),
-    path('about/', views.about_view, name='about'),
     path('register/', views.register_view, name='register'),
     path('login/', views.login_view, name='login'),
     path('logout/', views.logout_view, name='logout'),
@@ -53,5 +52,4 @@ urlpatterns = [
     # Exports
     path('export/pdf/<int:session_id>/', views.export_pdf_view, name='export_pdf'),
     path('export/excel/<int:session_id>/', views.export_excel_view, name='export_excel'),
-    path('export/csv/<int:session_id>/', views.export_csv_view, name='export_csv'),
 ]

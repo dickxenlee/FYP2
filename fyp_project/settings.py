@@ -75,12 +75,25 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'fyp_project.wsgi.application'
 
+# The database is chosen by the DATABASE_URL environment variable:
+#   • Render (online)  → PostgreSQL  (Render sets DATABASE_URL automatically)
+#   • Your PC (XAMPP)  → mysql://root:@127.0.0.1:3306/fyp_db?charset=utf8mb4
+#   • Not set          → local SQLite file (db.sqlite3)
+# Same code runs everywhere — only the env var changes.
+import dj_database_url
+
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    'default': dj_database_url.config(
+        default=f'sqlite:///{BASE_DIR / "db.sqlite3"}',
+        conn_max_age=600,
+    )
 }
+
+# MySQL/MariaDB only: enable strict mode so bad data raises an error instead of
+# being silently truncated. Skipped for PostgreSQL (Render) and SQLite.
+if DATABASES['default']['ENGINE'].endswith('mysql'):
+    DATABASES['default'].setdefault('OPTIONS', {})
+    DATABASES['default']['OPTIONS']['init_command'] = "SET sql_mode='STRICT_TRANS_TABLES'"
 
 AUTHENTICATION_BACKENDS = [
     'core.auth_backends.EmailOrUsernameBackend',

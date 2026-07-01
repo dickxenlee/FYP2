@@ -8,6 +8,9 @@ class RegisterForm(forms.ModelForm):
     password = forms.CharField(
         widget=forms.PasswordInput(attrs={'placeholder': 'Password'})
     )
+    confirm_password = forms.CharField(
+        widget=forms.PasswordInput(attrs={'placeholder': 'Confirm Password'})
+    )
     email = forms.EmailField(
         widget=forms.EmailInput(attrs={'placeholder': 'Email'})
     )
@@ -27,6 +30,14 @@ class RegisterForm(forms.ModelForm):
         if password:
             validate_password(password)
         return password
+
+    def clean(self):
+        cleaned_data = super().clean()
+        password = cleaned_data.get('password')
+        confirm_password = cleaned_data.get('confirm_password')
+        if password and confirm_password and password != confirm_password:
+            self.add_error('confirm_password', 'The two passwords do not match.')
+        return cleaned_data
 
     def save(self, commit=True):
         user = super().save(commit=False)

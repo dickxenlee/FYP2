@@ -4,6 +4,7 @@ from django.test import TestCase, SimpleTestCase
 from django.contrib.auth.models import User
 
 from .services.qa_analyzer import QAAnalyzer
+from .services.text_preprocessor import TextPreprocessor
 from .models import (
     Workspace, WorkspaceMembership, AnalysisSession, TestScenario,
     DetailedTestCase, WorkspaceDraftInput,
@@ -353,3 +354,30 @@ class QAParserTests(SimpleTestCase):
         result = QAAnalyzer()._parse('not json at all {oops')
         self.assertEqual(len(result['requirements']), 1)
         self.assertTrue(result['quality_assessment']['warnings'])
+
+
+class TextPreprocessorTests(SimpleTestCase):
+    """The NLP text-normalization step applied before the LLM analysis."""
+
+    def setUp(self):
+        self.pre = TextPreprocessor()
+
+    def test_empty_input(self):
+        self.assertEqual(self.pre.clean(''), '')
+
+    def test_collapses_whitespace_and_blank_lines(self):
+        out = self.pre.clean('The   system    shall   log   in.\n\n\n\nIt is fast.')
+        self.assertEqual(out, 'The system shall log in.\n\nIt is fast.')
+
+    def test_strips_markdown_markers_at_line_start(self):
+        out = self.pre.clean('# Heading\n- bullet point\n> quote')
+        self.assertEqual(out, 'Heading\nbullet point\nquote')
+
+    def test_normalizes_unicode_smart_quotes(self):
+        # smart quotes / full-width chars become plain equivalents
+        out = self.pre.clean('“Login” must be Ｔested')
+        self.assertEqual(out, '"Login" must be Tested')
+
+    def test_removes_zero_width_characters(self):
+        out = self.pre.clean('pass​word')
+        self.assertEqual(out, 'password')

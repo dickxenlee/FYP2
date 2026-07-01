@@ -1,7 +1,9 @@
-Django==5.1.1
+Django==4.2.16
 google-generativeai==0.8.5
 reportlab==4.5.1
 openpyxl==3.1.5
 python-dotenv==1.2.1
 gunicorn==22.0.0
 whitenoise==6.7.0
+dj-database-url==2.2.0
+psycopg2-binary==2.9.9

@@ -9,14 +9,21 @@
 .collab-bar {
     background: #1a252f;
     border-bottom: 2px solid #2ecc71;
-    padding: 0.45rem 1.2rem;
+    padding: 0.45rem 1rem;
     display: flex;
     align-items: center;
-    gap: 0.8rem;
+    gap: 0.55rem;
     font-size: 0.82rem;
     color: #ecf0f1;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;        /* keep everything on one line */
+    overflow: hidden;
+    white-space: nowrap;
 }
+/* Identity stays its natural size; the member list is the only part allowed to shrink. */
+.collab-bar > span:first-child,
+.collab-bar .ws-name,
+.collab-bar .ws-id-badge { flex-shrink: 0; }
+.collab-bar button { flex-shrink: 0; }
 .collab-bar .ws-name { font-weight: 600; color: #2ecc71; }
 .ws-id-badge {
     background: #2c3e50;
@@ -27,7 +34,14 @@
     font-size: 0.8rem;
     color: #95a5a6;
 }
-.ws-members { color: #bdc3c7; }
+.ws-members {
+    color: #bdc3c7;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .ws-bar-spacer { margin-left: auto; }
 .btn-share-ws {
     background: #27ae60;
@@ -298,7 +312,6 @@ tr.scenario-done-row .editable-item { text-decoration: line-through; }
     </div>
     <ul class="navbar-links">
         <li><a href="{% url 'home' %}">Home</a></li>
-        <li><a href="{% url 'about' %}">About Us</a></li>
         <li><a href="{% url 'logout' %}" class="btn btn-outline">Sign Out</a></li>
     </ul>
 </nav>
@@ -328,9 +341,11 @@ tr.scenario-done-row .editable-item { text-decoration: line-through; }
     <button class="btn-refresh-ws" id="renameWorkspaceBtn">&#9998; Rename</button>
     {% endif %}
     <button class="btn-share-ws" id="addShareBtn">&#128101; Add / Share</button>
-    <button class="btn-refresh-ws" id="quitWorkspaceBtn">&#128682; Quit</button>
+    <button class="btn-refresh-ws" id="quitWorkspaceBtn">&#127968; Personal Chat</button>
     {% if is_owner %}
     <button class="btn-danger-ws" id="deleteWorkspaceBtn">&#128465; Delete Workspace</button>
+    {% else %}
+    <button class="btn-danger-ws" id="leaveTeamBtn">&#128682; Leave Team</button>
     {% endif %}
 </div>
 {% endif %}
@@ -521,7 +536,7 @@ tr.scenario-done-row .editable-item { text-decoration: line-through; }
 {% endblock %}
 
 {% block extra_js %}
-<script src="{% static 'js/workspace.js' %}?v=13"></script>
+<script src="{% static 'js/workspace.js' %}?v=14"></script>
 <script>
 /* Workspace create / rename / quit / add-share — inline so it is never cached */
 (function () {
@@ -601,11 +616,19 @@ tr.scenario-done-row .editable-item { text-decoration: line-through; }
         };
     }
 
-    // ── Quit workspace (any member, returns to personal chat) ──
+    // ── Back to personal chat (stay a member; team & its chats remain in the sidebar) ──
     var quitBtn = document.getElementById('quitWorkspaceBtn');
     if (quitBtn) {
         quitBtn.onclick = function () {
-            if (!confirm('Leave this workspace? You can re-join later with the link.')) return;
+            window.location.href = '/workspace/';
+        };
+    }
+
+    // ── Leave team (non-owner: remove membership + delete own draft contribution) ──
+    var leaveBtn = document.getElementById('leaveTeamBtn');
+    if (leaveBtn) {
+        leaveBtn.onclick = function () {
+            if (!confirm('Leave this team?\nYour draft contribution will be deleted. You can re-join later with the link.')) return;
             postJSON('/leave_workspace/', { workspace_id: wsId }).then(function (res) {
                 if (!res.ok) { notify(res.data.error || 'Could not leave.', 'error'); return; }
                 window.location.href = '/workspace/';
