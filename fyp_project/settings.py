@@ -82,14 +82,20 @@ WSGI_APPLICATION = 'fyp_project.wsgi.application'
 # Same code runs everywhere — only the env var changes.
 import dj_database_url
 
-# Use DATABASE_URL when it holds a real value; treat an empty/blank value the
-# same as "not set" so the parser never chokes on '' (e.g. an empty env var on
-# the host) and safely falls back to the local SQLite file.
-_db_url = os.environ.get('DATABASE_URL', '').strip() or f'sqlite:///{BASE_DIR / "db.sqlite3"}'
-
-DATABASES = {
-    'default': dj_database_url.parse(_db_url, conn_max_age=600)
-}
+# Use DATABASE_URL only when it is a real database URL (contains "://", e.g.
+# postgres://... or mysql://...). Any empty, blank, or malformed value is
+# treated as "not set" and safely falls back to the local SQLite file, so a bad
+# env var on the host can never crash startup.
+_db_url = os.environ.get('DATABASE_URL', '').strip()
+if '://' in _db_url:
+    DATABASES = {'default': dj_database_url.parse(_db_url, conn_max_age=600)}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 # MySQL/MariaDB only: enable strict mode so bad data raises an error instead of
 # being silently truncated. Skipped for PostgreSQL (Render) and SQLite.
