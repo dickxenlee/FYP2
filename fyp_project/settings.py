@@ -82,11 +82,13 @@ WSGI_APPLICATION = 'fyp_project.wsgi.application'
 # Same code runs everywhere — only the env var changes.
 import dj_database_url
 
+# Use DATABASE_URL when it holds a real value; treat an empty/blank value the
+# same as "not set" so the parser never chokes on '' (e.g. an empty env var on
+# the host) and safely falls back to the local SQLite file.
+_db_url = os.environ.get('DATABASE_URL', '').strip() or f'sqlite:///{BASE_DIR / "db.sqlite3"}'
+
 DATABASES = {
-    'default': dj_database_url.config(
-        default=f'sqlite:///{BASE_DIR / "db.sqlite3"}',
-        conn_max_age=600,
-    )
+    'default': dj_database_url.parse(_db_url, conn_max_age=600)
 }
 
 # MySQL/MariaDB only: enable strict mode so bad data raises an error instead of
