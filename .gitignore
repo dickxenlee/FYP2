@@ -33,3 +33,9 @@ _fyp1.txt
 *.pptx
 ~$*
 *.tmp
+
+# Backups / archives
+*.zip
+
+# Local scratch / temp work
+scratch/

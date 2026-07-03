@@ -123,7 +123,7 @@ function loadSession(sessionId) {
             clearChat();
             currentSessionId = data.session_id;
             appendUserMessage(data.requirements_text);
-            appendAnalysisResult(data);
+            appendAnalysisResult(data, true);  // saved session — show scenarios right away
         })
         .catch(function (err) { console.error('Failed to load session:', err); });
 }
@@ -358,24 +358,27 @@ function appendSuggestionConfirmBox(data) {
     block.className = 'response-block';
     var suggestedText = data.suggested_requirement;
     var html = '<div class="suggestion-box">';
-    html += '<div class="suggestion-title">&#9650; Suggested Improvement</div>';
-    html += '<p class="suggestion-label">The system detected quality issues. Here\'s an improved version &mdash; would you like to use it?</p>';
-    html += '<div class="suggestion-preview">' + escapeHtml(suggestedText) + '</div>';
-    html += '<div class="decision-prompt">Use the suggested input?</div>';
+    html += '<div class="suggestion-title">&#9650; Improve Your Requirement</div>';
+    html += '<p class="suggestion-label">The requirement looks weak, so its quality score is low. Here is an improved version &mdash; you can edit it or add more details before generating.</p>';
+    html += '<textarea class="suggestion-edit" rows="6">' + escapeHtml(suggestedText) + '</textarea>';
+    html += '<div class="suggestion-hint">Tip: add any missing rules, limits, or error handling to raise the quality.</div>';
     html += '<div class="decision-buttons">';
-    html += '<button class="btn-decision btn-yes">&#10003;&nbsp; Yes, use suggested input</button>';
-    html += '<button class="btn-decision btn-no">&#10007;&nbsp; No, use my original input</button>';
+    html += '<button class="btn-decision btn-yes">&#10003;&nbsp; Generate with this requirement</button>';
+    html += '<button class="btn-decision btn-no">&#10007;&nbsp; Use my original input</button>';
     html += '</div></div>';
     block.innerHTML = html;
     chatMessages.appendChild(block);
     scrollToBottom();
 
+    var editArea = block.querySelector('.suggestion-edit');
     block.querySelector('.btn-yes').addEventListener('click', function () {
-        block.querySelectorAll('button').forEach(function (el) { el.disabled = true; });
-        handleGenerateFromEdited(suggestedText, block);
+        var edited = (editArea.value || '').trim();
+        if (!edited) { showToast('Please enter a requirement first.', 'error'); return; }
+        block.querySelectorAll('button, textarea').forEach(function (el) { el.disabled = true; });
+        handleGenerateFromEdited(edited, block);
     });
     block.querySelector('.btn-no').addEventListener('click', function () {
-        block.querySelectorAll('button').forEach(function (el) { el.disabled = true; });
+        block.querySelectorAll('button, textarea').forEach(function (el) { el.disabled = true; });
         block.querySelector('.decision-buttons').innerHTML = '<span class="decision-confirmed">&#10007; Using your original input</span>';
         currentSessionId = data.session_id;
         addSessionToHistory(data);
@@ -419,11 +422,11 @@ function handleGenerateFromEdited(editedText, suggestionBlock) {
 // QA Report — 6-section renderer
 // ═════════════════════════════════════════════
 
-function appendAnalysisResult(data) {
+function appendAnalysisResult(data, revealScenarios) {
     var block = document.createElement('div');
     block.className = 'qa-report';
     if (data.session_id) block.dataset.sessionId = data.session_id;
-    populateReport(block, data);
+    populateReport(block, data, revealScenarios);
     chatMessages.appendChild(block);
     scrollToBottom();
     lastContentSig = contentSignature(data);
@@ -432,33 +435,40 @@ function appendAnalysisResult(data) {
 // Build the report HTML into `block` and wire up all of its handlers.
 // Shared by the first render and the live teammate-edit refresh, so a
 // re-render restores every button, checkbox, and editable cell.
-function populateReport(block, data) {
+function populateReport(block, data, revealScenarios) {
+    // Staged QA flow: show the quality review, findings, requirement analysis
+    // and test conditions first; the traceable test scenarios stay behind a
+    // "Generate Test Scenarios" gate until the reviewer is ready. Opening an
+    // already-saved session reveals the scenarios right away.
+    var hasScenarios = data.scenarios && data.scenarios.length > 0;
+    var reveal = revealScenarios || block.dataset.scenariosRevealed === '1';
+
     var html = '';
 
-    if (data.requirements && data.requirements.length > 0) {
-        html += buildRequirementsSection(data.requirements);
-    }
-    if (data.test_conditions && data.test_conditions.length > 0) {
-        html += buildTestConditionsSection(data.test_conditions);
-    }
+    // 1. Requirement Quality Assessment
     if (data.quality_assessment) {
         html += buildQualityAssessmentSection(data.quality_assessment);
     }
+    // 2. Requirement Review Findings
     if (data.gaps && data.gaps.length > 0) {
         html += buildGapsSection(data.gaps);
     }
-    if (data.scenarios && data.scenarios.length > 0) {
-        html += buildTestScenariosSection(data.scenarios);
+    // 3. Requirement Analysis
+    if (data.requirements && data.requirements.length > 0) {
+        html += buildRequirementsSection(data.requirements);
+    }
+    // 4. Test Conditions
+    if (data.test_conditions && data.test_conditions.length > 0) {
+        html += buildTestConditionsSection(data.test_conditions);
     }
 
-    // Section 6: Detailed Test Cases (button-triggered)
-    if (data.session_id && data.scenarios && data.scenarios.length > 0) {
-        html += '<div class="qa-section">';
-        html += '<div class="qa-section-header"><span class="section-num">6</span>Detailed Test Cases</div>';
-        html += '<div style="padding:0.8rem 1rem 0;">';
-        html += '<p style="font-size:0.83rem;color:var(--color-muted);margin-bottom:0.6rem;">Expand each scenario into full test data, step-by-step instructions, and postconditions.</p>';
-        html += '<button class="btn-generate-detailed">&#9654;&nbsp; Generate Detailed Test Cases</button>';
-        html += '</div><div class="detailed-cases-container"></div></div>';
+    // 5. Traceable Test Scenarios (+ 6. Detailed Test Cases) — behind the gate.
+    if (hasScenarios && !reveal) {
+        html += buildScenarioGateHtml();
+    } else if (hasScenarios) {
+        html += buildTestScenariosSection(data.scenarios);
+        html += buildDetailedSectionHtml(data);
+        block.dataset.scenariosRevealed = '1';
     }
 
     // Team Notes (collaborative freeform notes) — only inside a Team Workspace,
@@ -478,6 +488,16 @@ function populateReport(block, data) {
     }
 
     block.innerHTML = html;
+
+    // Scenario gate — reveal the traceable scenarios (and detailed cases) on click.
+    var genScenariosBtn = block.querySelector('.btn-generate-scenarios');
+    if (genScenariosBtn) {
+        genScenariosBtn.addEventListener('click', function () {
+            block.dataset.scenariosRevealed = '1';
+            populateReport(block, data, true);
+            scrollToBottom();
+        });
+    }
 
     // Section 6 button + any already-saved detailed cases (with per-step checkboxes)
     var detailBtn = block.querySelector('.btn-generate-detailed');
@@ -593,7 +613,7 @@ function buildRequirementsSection(requirements) {
         { label: 'Non-Functional Requirements', key: 'non_functional' },
     ];
     var html = '<div class="qa-section">';
-    html += '<div class="qa-section-header"><span class="section-num">1</span>Requirement Analysis';
+    html += '<div class="qa-section-header"><span class="section-num">3</span>Requirement Analysis';
     if (requirements.length > 1) {
         html += '<span class="edit-hint">' + requirements.length + ' requirements found</span>';
     }
@@ -632,7 +652,7 @@ function buildRequirementsSection(requirements) {
 
 function buildTestConditionsSection(conditions) {
     var html = '<div class="qa-section">';
-    html += '<div class="qa-section-header"><span class="section-num">2</span>Test Conditions';
+    html += '<div class="qa-section-header"><span class="section-num">4</span>Test Conditions';
     html += '<span class="edit-hint">&#9998; click a cell to edit</span></div>';
     html += '<div class="qa-table-wrapper"><table class="qa-table"><thead><tr>';
     html += '<th>Condition ID</th><th>Req</th><th>Test Condition</th><th>Type</th><th>Priority</th>';
@@ -660,7 +680,7 @@ function buildQualityAssessmentSection(qa) {
 
     var html = '<div class="qa-section">';
     html += '<div class="qa-section-header">';
-    html += '<span class="section-num">3</span>Requirement Quality Assessment';
+    html += '<span class="section-num">1</span>Requirement Quality Assessment';
     html += '<span class="severity-badge severity-' + sevSlug + '">' + escapeHtml(qa.severity || 'Medium') + ' Severity</span>';
     html += '<span class="edit-hint">&#9998; click text to edit</span>';
     html += '</div>';
@@ -712,7 +732,7 @@ function buildScoreCard(label, score, isOverall) {
 
 function buildGapsSection(gaps) {
     var html = '<div class="qa-section">';
-    html += '<div class="qa-section-header"><span class="section-num">4</span>Requirement Review Findings';
+    html += '<div class="qa-section-header"><span class="section-num">2</span>Requirement Review Findings';
     html += '<span class="edit-hint">&#9998; click a cell to edit</span></div>';
     html += '<div class="qa-table-wrapper"><table class="qa-table"><thead><tr>';
     html += '<th>Issue ID</th><th>Issue Type</th><th>Description</th><th>Suggested Clarification</th>';
@@ -764,6 +784,31 @@ function buildTestScenariosSection(scenarios) {
     });
 
     html += '</tbody></table></div></div>';
+    return html;
+}
+
+
+// Gate shown before the traceable scenarios. The reviewer generates them after
+// checking the quality, findings, analysis and conditions above.
+function buildScenarioGateHtml() {
+    var html = '<div class="qa-section scenario-gate-section">';
+    html += '<div class="qa-section-header"><span class="section-num">5</span>Traceable Test Scenarios</div>';
+    html += '<div class="scenario-gate">';
+    html += '<p class="scenario-gate-text">Review the quality assessment, review findings, requirement analysis and test conditions above. When you are ready, generate the traceable test scenarios.</p>';
+    html += '<button class="btn-generate-scenarios">&#9889;&nbsp; Generate Test Scenarios</button>';
+    html += '</div></div>';
+    return html;
+}
+
+// Section 6 (Detailed Test Cases) — rendered once the scenarios are revealed.
+function buildDetailedSectionHtml(data) {
+    if (!(data.session_id && data.scenarios && data.scenarios.length > 0)) return '';
+    var html = '<div class="qa-section">';
+    html += '<div class="qa-section-header"><span class="section-num">6</span>Detailed Test Cases</div>';
+    html += '<div style="padding:0.8rem 1rem 0;">';
+    html += '<p style="font-size:0.83rem;color:var(--color-muted);margin-bottom:0.6rem;">Expand each scenario into full test data, step-by-step instructions, and postconditions.</p>';
+    html += '<button class="btn-generate-detailed">&#9654;&nbsp; Generate Detailed Test Cases</button>';
+    html += '</div><div class="detailed-cases-container"></div></div>';
     return html;
 }
 
@@ -1319,7 +1364,7 @@ function renderTeamDraft(data) {
             // Any member can edit a teammate's input inline.
             return '<div class="ti-contribution">' + name +
                 '<textarea class="ti-edit-other" data-username="' + escapeHtml(it.username) +
-                '" style="color:' + col + '" rows="2">' + escapeHtml(it.text) + '</textarea></div>';
+                '" style="color:' + col + '" rows="4">' + escapeHtml(it.text) + '</textarea></div>';
         }).join('');
 
         teamDraftPreview.querySelectorAll('.ti-edit-other').forEach(function (ta) {

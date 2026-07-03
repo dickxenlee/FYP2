@@ -12,7 +12,7 @@ from .models import (
 
 
 class WorkspaceMembershipTests(TestCase):
-    """Owner-only rules for renaming, adding/removing members, and deleting."""
+    """Any member can rename, add/remove members, and delete; outsiders are blocked."""
 
     def setUp(self):
         self.owner = User.objects.create_user('owner', '', 'pw')
@@ -34,8 +34,15 @@ class WorkspaceMembershipTests(TestCase):
         self.ws.refresh_from_db()
         self.assertEqual(self.ws.name, 'New')
 
-    def test_member_cannot_rename(self):
+    def test_member_can_rename(self):
         self.client.force_login(self.member)
+        r = self.post('/rename_workspace/', {'workspace_id': self.ws.workspace_id, 'name': 'New name'})
+        self.assertEqual(r.status_code, 200)
+        self.ws.refresh_from_db()
+        self.assertEqual(self.ws.name, 'New name')
+
+    def test_outsider_cannot_rename(self):
+        self.client.force_login(self.outsider)
         r = self.post('/rename_workspace/', {'workspace_id': self.ws.workspace_id, 'name': 'Hack'})
         self.assertEqual(r.status_code, 403)
 
@@ -56,8 +63,15 @@ class WorkspaceMembershipTests(TestCase):
         r = self.post('/add_member/', {'workspace_id': self.ws.workspace_id, 'username': 'member'})
         self.assertEqual(r.status_code, 400)
 
-    def test_member_cannot_add(self):
+    def test_member_can_add(self):
         self.client.force_login(self.member)
+        r = self.post('/add_member/', {'workspace_id': self.ws.workspace_id, 'username': 'outsider'})
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(WorkspaceMembership.objects.filter(workspace=self.ws, user=self.outsider).exists())
+
+    def test_outsider_cannot_add(self):
+        stranger = User.objects.create_user('stranger', '', 'pw')
+        self.client.force_login(stranger)
         r = self.post('/add_member/', {'workspace_id': self.ws.workspace_id, 'username': 'outsider'})
         self.assertEqual(r.status_code, 403)
 
@@ -96,8 +110,14 @@ class WorkspaceMembershipTests(TestCase):
         self.assertFalse(AnalysisSession.objects.filter(pk=session.pk).exists())
         self.assertFalse(TestScenario.objects.filter(session_id=session.pk).exists())
 
-    def test_member_cannot_delete_workspace(self):
+    def test_member_can_delete_workspace(self):
         self.client.force_login(self.member)
+        r = self.post('/delete_workspace/', {'workspace_id': self.ws.workspace_id})
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(Workspace.objects.filter(pk=self.ws.pk).exists())
+
+    def test_outsider_cannot_delete_workspace(self):
+        self.client.force_login(self.outsider)
         r = self.post('/delete_workspace/', {'workspace_id': self.ws.workspace_id})
         self.assertEqual(r.status_code, 403)
 
@@ -128,7 +148,8 @@ class AuthTests(TestCase):
         self.assertFalse(User.objects.filter(username='bob').exists())
 
     def test_register_accepts_strong_password(self):
-        r = self.client.post('/register/', {'username': 'carol', 'email': 'carol@example.com', 'password': 'Str0ng!Pass99'})
+        r = self.client.post('/register/', {'username': 'carol', 'email': 'carol@example.com',
+                                            'password': 'Str0ng!Pass99', 'confirm_password': 'Str0ng!Pass99'})
         self.assertEqual(r.status_code, 302)
         self.assertTrue(User.objects.filter(username='carol').exists())
 

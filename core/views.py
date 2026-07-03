@@ -149,7 +149,7 @@ def create_workspace_view(request):
 
 
 # ─────────────────────────────────────────────
-# Rename a workspace (owner only)
+# Rename a workspace (any member)
 # ─────────────────────────────────────────────
 
 @login_required
@@ -166,8 +166,8 @@ def rename_workspace_view(request):
         return JsonResponse({'error': 'workspace_id and name are required.'}, status=400)
 
     workspace = get_object_or_404(Workspace, workspace_id=workspace_id)
-    if workspace.owner != request.user:
-        return JsonResponse({'error': 'Only the workspace owner can rename it.'}, status=403)
+    if not WorkspaceMembership.objects.filter(workspace=workspace, user=request.user).exists():
+        return JsonResponse({'error': 'Only a workspace member can rename it.'}, status=403)
 
     workspace.name = name[:200]
     workspace.save(update_fields=['name'])
@@ -204,7 +204,7 @@ def leave_workspace_view(request):
 
 
 # ─────────────────────────────────────────────
-# Add a member by username (owner only)
+# Add a member by username (any member)
 # ─────────────────────────────────────────────
 
 @login_required
@@ -221,8 +221,8 @@ def add_member_view(request):
         return JsonResponse({'error': 'workspace_id and username are required.'}, status=400)
 
     workspace = get_object_or_404(Workspace, workspace_id=workspace_id)
-    if workspace.owner != request.user:
-        return JsonResponse({'error': 'Only the workspace owner can add members.'}, status=403)
+    if not WorkspaceMembership.objects.filter(workspace=workspace, user=request.user).exists():
+        return JsonResponse({'error': 'Only a workspace member can add members.'}, status=403)
 
     try:
         user = User.objects.get(username__iexact=username)
@@ -243,7 +243,7 @@ def add_member_view(request):
 
 
 # ─────────────────────────────────────────────
-# Remove a member (owner only)
+# Remove a member (any member; the owner cannot be removed)
 # ─────────────────────────────────────────────
 
 @login_required
@@ -260,8 +260,8 @@ def remove_member_view(request):
         return JsonResponse({'error': 'workspace_id and username are required.'}, status=400)
 
     workspace = get_object_or_404(Workspace, workspace_id=workspace_id)
-    if workspace.owner != request.user:
-        return JsonResponse({'error': 'Only the workspace owner can remove members.'}, status=403)
+    if not WorkspaceMembership.objects.filter(workspace=workspace, user=request.user).exists():
+        return JsonResponse({'error': 'Only a workspace member can remove members.'}, status=403)
     if username.lower() == workspace.owner.username.lower():
         return JsonResponse({'error': 'The owner cannot be removed.'}, status=400)
 
@@ -279,7 +279,7 @@ def remove_member_view(request):
 
 
 # ─────────────────────────────────────────────
-# Delete a whole workspace + all its chats (owner only)
+# Delete a whole workspace + all its chats (any member)
 # ─────────────────────────────────────────────
 
 @login_required
@@ -295,8 +295,8 @@ def delete_workspace_view(request):
         return JsonResponse({'error': 'workspace_id is required.'}, status=400)
 
     workspace = get_object_or_404(Workspace, workspace_id=workspace_id)
-    if workspace.owner != request.user:
-        return JsonResponse({'error': 'Only the workspace owner can delete the workspace.'}, status=403)
+    if not WorkspaceMembership.objects.filter(workspace=workspace, user=request.user).exists():
+        return JsonResponse({'error': 'Only a workspace member can delete the workspace.'}, status=403)
 
     # Sessions use SET_NULL, so remove them explicitly for a complete deletion;
     # this cascades to their scenarios/conditions/gaps/feedback. Memberships
@@ -1181,15 +1181,14 @@ def export_pdf_view(request, session_id):
         story.append(Paragraph('6. Traceable Test Scenarios', heading_style))
         rows = []
         for s in d['scenarios']:
-            steps_html = '<br/>'.join(f'{i+1}. {esc(step)}' for i, step in enumerate(s.get_steps()))
             meta = (f'<font size=6 color="#888888">Req: {esc(s.requirement_ref or "-")} &middot; '
                     f'Cond: {esc(s.condition_ref or "-")} &middot; {esc(s.scenario_type)} &middot; '
                     f'Done: {"yes" if s.is_done else "no"}</font><br/>')
             desc = Paragraph(meta + esc(s.description), body_cell_style)
-            rows.append([s.scenario_id, desc, s.preconditions, steps_html, s.expected_result, s.priority])
+            rows.append([s.scenario_id, desc, s.preconditions, s.expected_result, s.priority])
         story.append(make_table(
-            ['ID', 'Description', 'Pre-Conditions', 'Test Steps', 'Expected Result', 'Priority'],
-            rows, [1.3*cm, 4.2*cm, 3.0*cm, 3.9*cm, 3.1*cm, 1.5*cm]))
+            ['ID', 'Description', 'Pre-Conditions', 'Expected Result', 'Priority'],
+            rows, [1.4*cm, 6.0*cm, 4.3*cm, 3.8*cm, 1.5*cm]))
 
     # ── 7. Detailed Test Cases (only if generated) ──
     if d['detailed']:

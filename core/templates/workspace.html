@@ -284,23 +284,45 @@ tr.scenario-done-row .editable-item { text-decoration: line-through; }
 .ti-row { display: flex; gap: 1rem; flex-wrap: wrap; }
 .ti-col { flex: 1; display: flex; flex-direction: column; min-width: 220px; }
 .ti-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #7f8c8d; font-weight: 600; margin-bottom: 0.35rem; }
-.ti-textarea { width: 100%; background: #1e2b38; border: 1px solid #3d5166; border-radius: 6px; color: #ecf0f1; font-size: 0.86rem; padding: 0.55rem 0.7rem; resize: vertical; font-family: inherit; box-sizing: border-box; }
+.ti-textarea { width: 100%; background: #1e2b38; border: 1px solid #3d5166; border-radius: 6px; color: #ecf0f1; font-size: 0.9rem; padding: 0.6rem 0.8rem; resize: vertical; font-family: inherit; box-sizing: border-box; min-height: 140px; line-height: 1.5; }
 .ti-textarea:focus { outline: 2px solid #3498db; border-color: #3498db; }
 .ti-saved { font-size: 0.72rem; color: #2ecc71; height: 1rem; margin-top: 0.2rem; }
-.ti-preview { flex: 1; background: #1e2b38; border: 1px solid #3d5166; border-radius: 6px; padding: 0.55rem 0.7rem; font-size: 0.84rem; overflow-y: auto; max-height: 150px; line-height: 1.5; }
-.ti-contribution { margin-bottom: 0.5rem; }
-.ti-author { font-weight: 700; font-size: 0.74rem; margin-bottom: 0.15rem; }
+.ti-preview { flex: 1; background: #1e2b38; border: 1px solid #3d5166; border-radius: 6px; padding: 0.6rem 0.8rem; font-size: 0.88rem; overflow-y: auto; min-height: 140px; max-height: 340px; line-height: 1.55; resize: vertical; }
+.ti-contribution { margin-bottom: 0.7rem; }
+.ti-author { font-weight: 700; font-size: 0.76rem; margin-bottom: 0.2rem; }
 .ti-text { white-space: pre-wrap; }
 .ti-edit-other {
     width: 100%; background: #16212c; border: 1px solid #3d5166; border-radius: 5px;
-    padding: 0.35rem 0.5rem; font-size: 0.82rem; font-family: inherit;
-    resize: vertical; box-sizing: border-box;
+    padding: 0.5rem 0.6rem; font-size: 0.86rem; font-family: inherit; line-height: 1.5;
+    resize: vertical; box-sizing: border-box; min-height: 80px;
 }
 .ti-edit-other:focus { outline: 2px solid #3498db; border-color: #3498db; }
 .ti-empty { color: #5d6d7e; font-style: italic; }
 .ti-generate-btn { margin-top: 0.7rem; background: #27ae60; color: #fff; border: none; border-radius: 6px; padding: 0.55rem 1.1rem; font-size: 0.9rem; font-weight: 700; cursor: pointer; }
 .ti-generate-btn:hover { background: #2ecc71; }
 .ti-generate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Editable suggestion box (weak input → let user add more detail) ── */
+.suggestion-edit {
+    width: 100%; box-sizing: border-box;
+    background: var(--color-white); border: 1px solid var(--color-border);
+    border-radius: 6px; color: var(--color-text);
+    font-size: 0.87rem; padding: 0.7rem 0.9rem;
+    resize: vertical; font-family: var(--font); line-height: 1.55;
+    min-height: 140px; margin-top: 0.4rem;
+}
+.suggestion-edit:focus { outline: 2px solid #3498db; border-color: #3498db; }
+.suggestion-hint { font-size: 0.76rem; color: var(--color-muted); margin: 0.4rem 0 0.8rem; }
+
+/* ── Scenario gate (review first, then generate the scenarios) ── */
+.scenario-gate { padding: 1rem; text-align: center; }
+.scenario-gate-text { font-size: 0.86rem; color: var(--color-muted); margin: 0 auto 0.9rem; max-width: 640px; line-height: 1.55; }
+.btn-generate-scenarios {
+    background: #27ae60; color: #fff; border: none; border-radius: 6px;
+    padding: 0.6rem 1.4rem; font-size: 0.92rem; font-weight: 700; cursor: pointer;
+}
+.btn-generate-scenarios:hover { background: #2ecc71; }
+.btn-generate-scenarios:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
 {% endblock %}
 
@@ -337,14 +359,11 @@ tr.scenario-done-row .editable-item { text-decoration: line-through; }
         {% for m in members %}{{ m.user.username }}{% if not forloop.last %}, {% endif %}{% endfor %}
     </span>
     <button class="btn-refresh-ws ws-bar-spacer" onclick="window.location.reload()">&#8635; Refresh</button>
-    {% if is_owner %}
     <button class="btn-refresh-ws" id="renameWorkspaceBtn">&#9998; Rename</button>
-    {% endif %}
     <button class="btn-share-ws" id="addShareBtn">&#128101; Add / Share</button>
     <button class="btn-refresh-ws" id="quitWorkspaceBtn">&#127968; Personal Chat</button>
-    {% if is_owner %}
     <button class="btn-danger-ws" id="deleteWorkspaceBtn">&#128465; Delete Workspace</button>
-    {% else %}
+    {% if not is_owner %}
     <button class="btn-danger-ws" id="leaveTeamBtn">&#128682; Leave Team</button>
     {% endif %}
 </div>
@@ -354,7 +373,6 @@ tr.scenario-done-row .editable-item { text-decoration: line-through; }
 <input type="hidden" id="csrfToken" value="{{ csrf_token }}">
 <input type="hidden" id="workspaceId" value="{{ workspace.workspace_id|default:'' }}">
 <input type="hidden" id="canDeleteChats" value="{{ can_delete_chats|yesno:'1,0' }}">
-<input type="hidden" id="isOwner" value="{{ is_owner|yesno:'1,0' }}">
 
 <div class="workspace-layout">
     <!-- ─── Sidebar ─── -->
@@ -458,7 +476,7 @@ tr.scenario-done-row .editable-item { text-decoration: line-through; }
             <div class="ti-row">
                 <div class="ti-col">
                     <div class="ti-label">Your input</div>
-                    <textarea id="myDraftInput" class="ti-textarea" rows="3"
+                    <textarea id="myDraftInput" class="ti-textarea" rows="6"
                               placeholder="Write your part of the requirement…"></textarea>
                     <div class="ti-saved" id="draftSavedHint"></div>
                 </div>
@@ -510,7 +528,6 @@ tr.scenario-done-row .editable-item { text-decoration: line-through; }
             </div>
         </div>
 
-        {% if is_owner %}
         <div class="share-section">
             <div class="share-section-label">Add a member by username</div>
             <div class="share-input-row">
@@ -518,7 +535,6 @@ tr.scenario-done-row .editable-item { text-decoration: line-through; }
                 <button id="confirmAddMemberBtn" class="share-btn share-btn-primary">Add</button>
             </div>
         </div>
-        {% endif %}
 
         <div class="share-section">
             <div class="share-section-label">Members (<span id="memberCountLabel">0</span>)</div>
@@ -536,7 +552,7 @@ tr.scenario-done-row .editable-item { text-decoration: line-through; }
 {% endblock %}
 
 {% block extra_js %}
-<script src="{% static 'js/workspace.js' %}?v=14"></script>
+<script src="{% static 'js/workspace.js' %}?v=15"></script>
 <script>
 /* Workspace create / rename / quit / add-share — inline so it is never cached */
 (function () {
@@ -598,7 +614,7 @@ tr.scenario-done-row .editable-item { text-decoration: line-through; }
         };
     }
 
-    // ── Rename workspace (owner only) ──
+    // ── Rename workspace (any member) ──
     var renameBtn = document.getElementById('renameWorkspaceBtn');
     if (renameBtn) {
         renameBtn.onclick = function () {
@@ -636,7 +652,7 @@ tr.scenario-done-row .editable-item { text-decoration: line-through; }
         };
     }
 
-    // ── Delete whole workspace (owner only, returns to personal chat) ──
+    // ── Delete whole workspace (any member, returns to personal chat) ──
     var deleteWsBtn = document.getElementById('deleteWorkspaceBtn');
     if (deleteWsBtn) {
         deleteWsBtn.onclick = function () {
@@ -652,7 +668,6 @@ tr.scenario-done-row .editable-item { text-decoration: line-through; }
     var addShareBtn   = document.getElementById('addShareBtn');
     var addShareModal = document.getElementById('addShareModal');
     if (addShareBtn && addShareModal) {
-        var isOwner     = ((document.getElementById('isOwner') || {}).value || '0') === '1';
         var linkInput   = document.getElementById('shareLinkInput');
         var copyBtn     = document.getElementById('copyShareLinkBtn');
         var closeBtn    = document.getElementById('closeAddShareBtn');
@@ -684,7 +699,7 @@ tr.scenario-done-row .editable-item { text-decoration: line-through; }
                 var ownerRow = data.owner && name.toLowerCase() === data.owner.toLowerCase();
                 var right = ownerRow
                     ? '<span class="member-owner-tag">owner</span>'
-                    : (isOwner ? '<button class="btn-remove-member" data-username="' + escapeHtml(name) + '" title="Remove member">&#10005;</button>' : '');
+                    : '<button class="btn-remove-member" data-username="' + escapeHtml(name) + '" title="Remove member">&#10005;</button>';
                 return '<div class="member-row"><span>&#128100;</span>' +
                     '<span class="member-name">' + escapeHtml(name) + '</span>' + right + '</div>';
             }).join('');
@@ -750,7 +765,7 @@ tr.scenario-done-row .editable-item { text-decoration: line-through; }
             }
         };
 
-        // ── Add member by name (owner only) ──
+        // ── Add member by name (any member) ──
         var addMember = function () {
             if (!memberInput) return;
             var username = memberInput.value.trim();
