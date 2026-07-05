@@ -60,7 +60,7 @@ Required JSON format:
       "type": "<positive | negative | edge>"
     }}
   ],
-  "suggested_requirement": "<if overall_score < 80, provide a professionally rewritten version using 'The system shall...' format. If overall_score >= 80, return an empty string.>"
+  "suggested_requirement": "<if overall_score < 80, rewrite the requirement so it fixes EVERY warning and gap listed above. Use 'The system shall...' format, replace vague words (fast, user-friendly, quickly) with measurable criteria, and state validation rules, error handling and boundaries explicitly. The rewrite must be complete enough to score at least 85 in clarity, completeness and testability if analysed again. If overall_score >= 80, return an empty string.>"
 }}
 
 Generation rules:
@@ -76,7 +76,14 @@ Generation rules:
 - Only include gaps that represent real issues — omit the array if the requirements are complete
 - Give EACH requirement its own clarity_score, completeness_score, and testability_score (0-100).
 - quality_assessment holds only the overall positive_aspects and warnings (document-level).
-- Provide suggested_requirement if any requirement scores below 80 overall.
+- Provide suggested_requirement if any requirement scores below 80 overall. The
+  rewrite must directly resolve every gap and warning you reported, add the missing
+  validation rules, error handling and measurable limits, and be self-contained so
+  that re-analysing it would yield clarity, completeness and testability of 85+.
+  Keep it focused on ONE coherent requirement: state the actor, the trigger/action,
+  the exact system response, input validation, error handling, and one measurable
+  acceptance criterion. Do NOT invent several unrelated features or expand scope —
+  a single, precisely specified requirement scores higher than a broad vague one.
 
 Example: input describing login AND password reset →
 requirements = [REQ-001 "User Login", REQ-002 "Password Reset"]
