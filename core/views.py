@@ -946,7 +946,20 @@ def delete_current_chat_view(request):
     if not session_id:
         return JsonResponse({'error': 'session_id is required.'}, status=400)
 
-    session = _get_accessible_session(session_id, request.user)
+    # Deleting is idempotent: if the chat is already gone (e.g. the button was
+    # clicked twice, or another tab removed it), report success instead of a
+    # 404 HTML page that the browser cannot parse as JSON.
+    session = AnalysisSession.objects.filter(id=session_id).first()
+    if session is None:
+        return JsonResponse({'system_action': 'chat_deleted', 'session_id': session_id})
+
+    # Only the chat's owner or a workspace member may delete it.
+    is_owner = session.user == request.user
+    is_member = session.workspace and WorkspaceMembership.objects.filter(
+        workspace=session.workspace, user=request.user
+    ).exists()
+    if not (is_owner or is_member):
+        return JsonResponse({'error': 'Access denied.'}, status=403)
 
     # Team (workspace) chats can only be deleted by the workspace owner.
     if session.workspace and session.workspace.owner != request.user:

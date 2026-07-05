@@ -223,7 +223,13 @@ function handleDeleteHistory() {
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
         body: JSON.stringify(body),
     })
-    .then(function (res) { return res.json(); })
+    .then(function (res) {
+        var ct = res.headers.get('content-type') || '';
+        if (ct.indexOf('application/json') === -1) {
+            throw new Error('Your session may have expired. Please refresh the page and sign in again.');
+        }
+        return res.json();
+    })
     .then(function (data) {
         if (data.error) { appendErrorMessage(data.error); return; }
         historyList.innerHTML = '<li class="history-empty" id="historyEmpty">No history yet.</li>';
@@ -332,7 +338,13 @@ function handleDeleteItem(sessionId, itemEl) {
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
         body: JSON.stringify({ session_id: sessionId }),
     })
-    .then(function (res) { return res.json(); })
+    .then(function (res) {
+        var ct = res.headers.get('content-type') || '';
+        if (ct.indexOf('application/json') === -1) {
+            throw new Error('Your session may have expired. Please refresh the page and sign in again.');
+        }
+        return res.json();
+    })
     .then(function (data) {
         if (data.error) { showToast(data.error, 'error'); return; }
         if (data.system_action !== 'chat_deleted') return;

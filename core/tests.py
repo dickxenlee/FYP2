@@ -182,6 +182,15 @@ class TeamChatDeleteTests(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertFalse(AnalysisSession.objects.filter(pk=self.session.pk).exists())
 
+    def test_deleting_missing_chat_returns_json_success(self):
+        # Deleting an already-gone chat must return JSON (not an HTML 404 page)
+        # so the browser never hits "Unexpected token '<'".
+        self.client.force_login(self.owner)
+        r = self.post('/delete_current_chat/', {'session_id': 999999})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r['Content-Type'], 'application/json')
+        self.assertEqual(r.json()['system_action'], 'chat_deleted')
+
 
 class StepDoneTests(TestCase):
     """Per-step 'done' checkbox on detailed test cases (saved & shared)."""
