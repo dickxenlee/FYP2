@@ -186,6 +186,10 @@ function handleSubmit() {
         body: JSON.stringify(body),
     })
     .then(function (res) {
+        var ct = res.headers.get('content-type') || '';
+        if (ct.indexOf('application/json') === -1) {
+            throw new Error('The server took too long or is waking up (free hosting sleeps after inactivity). Please wait about 30 seconds and try again.');
+        }
         if (!res.ok) return res.json().then(function (err) { throw new Error(err.error || 'Server error'); });
         return res.json();
     })
@@ -413,6 +417,10 @@ function handleGenerateFromEdited(editedText, suggestionBlock) {
         body: JSON.stringify(body),
     })
     .then(function (res) {
+        var ct = res.headers.get('content-type') || '';
+        if (ct.indexOf('application/json') === -1) {
+            throw new Error('The server took too long or is waking up (free hosting sleeps after inactivity). Please wait about 30 seconds and try again.');
+        }
         if (!res.ok) return res.json().then(function (err) { throw new Error(err.error || 'Server error'); });
         return res.json();
     })
