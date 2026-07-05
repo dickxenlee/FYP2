@@ -25,8 +25,7 @@ class GeminiUnavailable(GeminiError):
 
 class GeminiService:
     """
-    Wraps the Google Gemini API (model: gemini-2.5-flash-lite, chosen for its
-    high free-tier request limit).
+    Wraps the Google Gemini API (model: gemini-2.0-flash).
     """
 
     def __init__(self):
@@ -37,7 +36,7 @@ class GeminiService:
         # quota consumption) low; 8192 is high enough for a full multi-requirement
         # report, so the JSON is never cut off.
         self.model = genai.GenerativeModel(
-            'gemini-2.5-flash-lite',
+            'gemini-2.0-flash',
             generation_config={'temperature': 0, 'max_output_tokens': 8192},
         )
 
