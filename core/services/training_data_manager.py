@@ -40,8 +40,17 @@ class TrainingDataManager:
             testability_score=qa.get('testability_score', 0),
             severity=qa.get('severity', 'Medium'),
         )
+        self._save_related(session, qa_result)
+        return session
 
-        # Save positive aspects and warnings as FeedbackItems (used in PDF export)
+    def _save_related(self, session, qa_result: dict) -> None:
+        """
+        Saves the child rows of one analysis: feedback items (positive points
+        and warnings), test conditions, requirement gaps, and test scenarios.
+        Used by both a first save and a re-analysis.
+        """
+        qa = qa_result.get('quality_assessment', {})
+
         for msg in qa.get('positive_aspects', []):
             FeedbackItem.objects.create(
                 session=session, feedback_type='positive', message=msg
@@ -51,7 +60,6 @@ class TrainingDataManager:
                 session=session, feedback_type='warning', message=msg
             )
 
-        # Save test conditions (Section 2)
         for c in qa_result.get('test_conditions', []):
             TestCondition.objects.create(
                 session=session,
@@ -62,7 +70,6 @@ class TrainingDataManager:
                 priority=c.get('priority', 'Medium'),
             )
 
-        # Save requirement gaps (Section 4)
         for g in qa_result.get('gaps', []):
             RequirementGap.objects.create(
                 session=session,
@@ -72,7 +79,6 @@ class TrainingDataManager:
                 suggested_clarification=g.get('suggested_clarification', ''),
             )
 
-        # Save test scenarios (Section 5)
         for s in qa_result.get('test_scenarios', []):
             TestScenario.objects.create(
                 session=session,
@@ -86,8 +92,6 @@ class TrainingDataManager:
                 scenario_type=s.get('type', 'positive'),
                 priority=s.get('priority', 'Medium'),
             )
-
-        return session
 
     def save_detailed_cases(self, session_id: int,
                             detailed_cases: list) -> None:
@@ -120,60 +124,24 @@ class TrainingDataManager:
         Deletes all old related data and replaces it with the new results.
         """
         with transaction.atomic():
-            return self._reanalyze_session_inner(session, qa_result)
+            qa = qa_result['quality_assessment']
+            requirements = qa_result.get('requirements', [])
+            first_req_id = requirements[0]['requirement_id'] if requirements else 'REQ-001'
 
-    def _reanalyze_session_inner(self, session, qa_result: dict):
-        qa = qa_result['quality_assessment']
-        requirements = qa_result.get('requirements', [])
-        first_req_id = requirements[0]['requirement_id'] if requirements else 'REQ-001'
+            session.accuracy_score = qa['overall_score']
+            session.suggested_requirement = qa_result.get('suggested_requirement', '')
+            session.requirement_id = first_req_id
+            session.extracted_info = json.dumps({'requirements': requirements})
+            session.clarity_score = qa['clarity_score']
+            session.completeness_score = qa['completeness_score']
+            session.testability_score = qa['testability_score']
+            session.severity = qa['severity']
+            session.save()
 
-        session.accuracy_score = qa['overall_score']
-        session.suggested_requirement = qa_result.get('suggested_requirement', '')
-        session.requirement_id = first_req_id
-        session.extracted_info = json.dumps({'requirements': requirements})
-        session.clarity_score = qa['clarity_score']
-        session.completeness_score = qa['completeness_score']
-        session.testability_score = qa['testability_score']
-        session.severity = qa['severity']
-        session.save()
+            session.feedback_items.all().delete()
+            session.test_conditions.all().delete()
+            session.gaps.all().delete()
+            session.test_scenarios.all().delete()
 
-        session.feedback_items.all().delete()
-        session.test_conditions.all().delete()
-        session.gaps.all().delete()
-        session.test_scenarios.all().delete()
-
-        for msg in qa.get('positive_aspects', []):
-            FeedbackItem.objects.create(session=session, feedback_type='positive', message=msg)
-        for msg in qa.get('warnings', []):
-            FeedbackItem.objects.create(session=session, feedback_type='warning', message=msg)
-        for c in qa_result.get('test_conditions', []):
-            TestCondition.objects.create(
-                session=session,
-                condition_id=c.get('condition_id', ''),
-                requirement_ref=c.get('requirement_ref', ''),
-                description=c.get('description', ''),
-                condition_type=c.get('type', 'Positive'),
-                priority=c.get('priority', 'Medium'),
-            )
-        for g in qa_result.get('gaps', []):
-            RequirementGap.objects.create(
-                session=session,
-                issue_id=g.get('issue_id', ''),
-                issue_type=g.get('issue_type', ''),
-                description=g.get('description', ''),
-                suggested_clarification=g.get('suggested_clarification', ''),
-            )
-        for s in qa_result.get('test_scenarios', []):
-            TestScenario.objects.create(
-                session=session,
-                scenario_id=s.get('id', ''),
-                requirement_ref=s.get('requirement_ref', ''),
-                condition_ref=s.get('condition_ref', ''),
-                description=s.get('description', ''),
-                preconditions=s.get('preconditions', ''),
-                steps_json=json.dumps(s.get('steps', [])),
-                expected_result=s.get('expected_result', ''),
-                scenario_type=s.get('type', 'positive'),
-                priority=s.get('priority', 'Medium'),
-            )
-        return session
+            self._save_related(session, qa_result)
+            return session
