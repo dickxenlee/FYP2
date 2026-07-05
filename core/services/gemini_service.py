@@ -33,9 +33,12 @@ class GeminiService:
         genai.configure(api_key=settings.GEMINI_API_KEY)
         # temperature=0 makes the output deterministic, so the same requirement
         # always returns the same Accuracy Score (reproducible for evaluation).
+        # max_output_tokens caps each reply to keep token usage (and free-tier
+        # quota consumption) low; 8192 is high enough for a full multi-requirement
+        # report, so the JSON is never cut off.
         self.model = genai.GenerativeModel(
             'gemini-2.5-flash-lite',
-            generation_config={'temperature': 0},
+            generation_config={'temperature': 0, 'max_output_tokens': 8192},
         )
 
     # Max seconds to wait for one Gemini reply before giving up, so a slow or

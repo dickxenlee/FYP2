@@ -70,8 +70,8 @@ Generation rules:
 - If the input is a single feature with many details, return just ONE requirement (REQ-001).
 - Every test_condition MUST set requirement_ref to the requirement it tests.
 - Every test_scenario MUST set requirement_ref (its requirement) and condition_ref (its condition).
-- Generate 3 to 6 test_conditions PER requirement, covering Positive, Negative, and Boundary.
-- Generate 3 to 6 test_scenarios PER requirement — link each to its condition via condition_ref.
+- Generate 3 to 4 test_conditions PER requirement, covering Positive, Negative, and Boundary.
+- Generate 3 to 4 test_scenarios PER requirement — link each to its condition via condition_ref.
 - Scenario descriptions must be concise — do NOT write step-by-step instructions
 - Only include gaps that represent real issues — omit the array if the requirements are complete
 - Give EACH requirement its own clarity_score, completeness_score, and testability_score (0-100).
