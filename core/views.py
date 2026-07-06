@@ -1341,17 +1341,19 @@ def export_excel_view(request, session_id):
     set_widths(s4, [12, 18, 45, 45])
 
     # ── Sheet 5: Test Scenarios ──
+    # (No steps column here — steps belong to detailed test cases, which are
+    # generated on demand and exported in the Detailed Cases sheet.)
     s5 = wb.create_sheet('Test Scenarios')
     header_row(s5, ['ID', 'Req Ref', 'Cond Ref', 'Description', 'Preconditions',
-                    'Test Steps', 'Expected Result', 'Type', 'Priority', 'Done'])
+                    'Expected Result', 'Type', 'Priority', 'Done'])
     for r, s in enumerate(d['scenarios'], start=2):
         values = [s.scenario_id, s.requirement_ref, s.condition_ref, s.description,
-                  s.preconditions, '\n'.join(s.get_steps()), s.expected_result,
+                  s.preconditions, s.expected_result,
                   s.scenario_type, s.priority, 'Yes' if s.is_done else 'No']
         for col, value in enumerate(values, start=1):
             s5.cell(row=r, column=col, value=value)
     wrap_sheet(s5)
-    set_widths(s5, [10, 12, 10, 32, 28, 40, 32, 10, 10, 10])
+    set_widths(s5, [10, 12, 10, 36, 32, 36, 10, 10, 10])
 
     # ── Sheet 6: Detailed Cases (only if generated) ──
     if d['detailed']:
