@@ -490,6 +490,17 @@ class TwoStageAnalyzerTests(SimpleTestCase):
         self.assertEqual(len(result['test_scenarios']), 2)
         self.assertEqual(result['test_scenarios'][0]['requirement_ref'], 'REQ-002')
 
+    def test_generate_scenarios_only_skips_the_extract_call(self):
+        # No extract_reply needed — this must never send the EXTRACT_PROMPT.
+        fake = FakeLLM('SHOULD NOT BE USED', {'REQ-001': _scenario_reply('REQ-001')})
+        already_scored = [{'requirement_id': 'REQ-001', 'title': 'Speed',
+                            'clarity_score': 30, 'completeness_score': 30,
+                            'testability_score': 30, 'overall_score': 30, 'severity': 'High'}]
+        result = self.analyzer_with(fake).generate_scenarios_only('be fast', already_scored)
+        self.assertEqual(len(fake.prompts), 1)   # only the scenario call, no extract
+        self.assertEqual(len(result['test_scenarios']), 2)
+        self.assertEqual(result['requirements'], already_scored)
+
 
 class KeepOriginalViewTests(TestCase):
     """POST /analyze/ with keep_session_id fills in scenarios for the
@@ -498,16 +509,19 @@ class KeepOriginalViewTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user('dick', '', 'pw')
         self.client.force_login(self.user)
+        saved_requirements = [{'requirement_id': 'REQ-001', 'title': 'Speed',
+                               'clarity_score': 30, 'completeness_score': 30,
+                               'testability_score': 30, 'overall_score': 30, 'severity': 'High'}]
         self.session = AnalysisSession.objects.create(
             user=self.user, title='weak', requirements_text='be fast',
             accuracy_score=30, requirement_id='REQ-001',
+            extracted_info=json.dumps({'requirements': saved_requirements}),
         )
+        self.saved_requirements = saved_requirements
 
-    def test_keep_original_generates_full_report(self):
+    def test_keep_original_skips_reextraction_and_generates_scenarios(self):
         full_result = {
-            'requirements': [{'requirement_id': 'REQ-001', 'title': 'Speed',
-                              'clarity_score': 30, 'completeness_score': 30,
-                              'testability_score': 30, 'overall_score': 30, 'severity': 'High'}],
+            'requirements': self.saved_requirements,
             'quality_assessment': {'clarity_score': 30, 'completeness_score': 30,
                                    'testability_score': 30, 'overall_score': 30,
                                    'severity': 'High', 'positive_aspects': [], 'warnings': ['vague']},
@@ -517,16 +531,18 @@ class KeepOriginalViewTests(TestCase):
                                 'condition_ref': 'C01', 'description': 'd', 'preconditions': 'p',
                                 'steps': [], 'expected_result': 'e', 'priority': 'High',
                                 'type': 'positive'}],
-            'suggested_requirement': 'The system shall respond within 2 seconds.',
+            'suggested_requirement': '',
         }
         with patch('core.views.QAAnalyzer') as MockAnalyzer:
-            MockAnalyzer.return_value.analyze.return_value = full_result
+            MockAnalyzer.return_value.generate_scenarios_only.return_value = full_result
             r = self.client.post('/analyze/',
                                  json.dumps({'keep_session_id': self.session.id}),
                                  content_type='application/json')
             self.assertEqual(r.status_code, 200)
-            MockAnalyzer.return_value.analyze.assert_called_once_with(
-                'be fast', force_full=True)
+            # Stage 1 (extract) must NOT be called again — only stage 2.
+            MockAnalyzer.return_value.analyze.assert_not_called()
+            MockAnalyzer.return_value.generate_scenarios_only.assert_called_once_with(
+                'be fast', self.saved_requirements)
         self.assertEqual(self.session.test_scenarios.count(), 1)
 
     def test_keep_original_other_users_session_denied(self):

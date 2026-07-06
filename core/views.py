@@ -606,11 +606,13 @@ def analyze_view(request):
         keep_session_id = None
 
     # User chose "use my original input" on a weak requirement: the session
-    # was already saved without scenarios, so generate the full report now.
+    # was already scored in stage 1, so skip straight to stage 2 (scenarios)
+    # instead of re-extracting the same text again.
     if keep_session_id:
         session = _get_accessible_session(keep_session_id, request.user)
+        requirements = session.get_extracted_info().get('requirements', [])
         try:
-            qa_result = QAAnalyzer().analyze(session.requirements_text, force_full=True)
+            qa_result = QAAnalyzer().generate_scenarios_only(session.requirements_text, requirements)
         except GeminiError as e:
             return JsonResponse({'error': str(e)}, status=e.status)
         TrainingDataManager().reanalyze_session(session, qa_result)

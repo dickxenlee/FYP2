@@ -147,7 +147,41 @@ class QAAnalyzer:
         if result['suggested_requirement'] and not force_full:
             return result
 
-        # Stage 2 in parallel — one scenario call per requirement.
+        self._fill_scenarios(result, clean_text)
+        return result
+
+    def generate_scenarios_only(self, requirements_text: str, requirements: list) -> dict:
+        """
+        Stage 2 only, skipping stage 1's extract call. Used when a session
+        was already scored earlier (e.g. the user picked "keep my original
+        input" after seeing a weak-input suggestion) — re-extracting the
+        same text again would waste a call.
+        """
+        result = self._default_error()
+        result['requirements'] = requirements
+        qa = requirements[0] if requirements else {}
+        n = len(requirements) or 1
+
+        def sev(score):
+            return 'Low' if score >= 80 else 'Medium' if score >= 60 else 'High'
+
+        overall = round(sum(r.get('overall_score', 0) for r in requirements) / n)
+        result['quality_assessment'] = {
+            'clarity_score': round(sum(r.get('clarity_score', 0) for r in requirements) / n),
+            'completeness_score': round(sum(r.get('completeness_score', 0) for r in requirements) / n),
+            'testability_score': round(sum(r.get('testability_score', 0) for r in requirements) / n),
+            'overall_score': overall,
+            'severity': sev(overall),
+            'positive_aspects': [],
+            'warnings': [],
+        }
+        result['suggested_requirement'] = ''
+        clean_text = self.preprocessor.clean(requirements_text)
+        self._fill_scenarios(result, clean_text)
+        return result
+
+    def _fill_scenarios(self, result: dict, clean_text: str) -> None:
+        """Stage 2 in parallel — one scenario call per requirement, merged into result."""
         with ThreadPoolExecutor(max_workers=4) as pool:
             parts = list(pool.map(
                 lambda req: self._generate_for_requirement(clean_text, req),
@@ -166,7 +200,6 @@ class QAAnalyzer:
                 s['id'] = 'TS-{:03d}'.format(len(result['test_scenarios']) + 1)
                 s['condition_ref'] = id_map.get(s['condition_ref'], s['condition_ref'])
                 result['test_scenarios'].append(s)
-        return result
 
     def _generate_for_requirement(self, clean_text: str, req: dict):
         """One stage-2 call: conditions + scenarios for a single requirement."""
