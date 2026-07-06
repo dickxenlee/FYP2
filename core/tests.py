@@ -473,6 +473,12 @@ class TwoStageAnalyzerTests(SimpleTestCase):
         })
         result = self.analyzer_with(fake).analyze('login and fine payment')
         self.assertEqual(len(fake.prompts), 3)   # extract + 2 parallel scenario calls
+        # The full input text is sent ONCE (extract only) — stage-2 calls
+        # carry just their own requirement's details, saving input tokens.
+        scenario_prompts = [p for p in fake.prompts if 'ONE requirement only' in p]
+        self.assertEqual(len(scenario_prompts), 2)
+        for p in scenario_prompts:
+            self.assertNotIn('login and fine payment', p)
         conditions, scenarios = result['test_conditions'], result['test_scenarios']
         self.assertEqual([c['condition_id'] for c in conditions], ['C01', 'C02', 'C03', 'C04'])
         self.assertEqual([s['id'] for s in scenarios], ['TS-001', 'TS-002', 'TS-003', 'TS-004'])
@@ -496,7 +502,7 @@ class TwoStageAnalyzerTests(SimpleTestCase):
         already_scored = [{'requirement_id': 'REQ-001', 'title': 'Speed',
                             'clarity_score': 30, 'completeness_score': 30,
                             'testability_score': 30, 'overall_score': 30, 'severity': 'High'}]
-        result = self.analyzer_with(fake).generate_scenarios_only('be fast', already_scored)
+        result = self.analyzer_with(fake).generate_scenarios_only(already_scored)
         self.assertEqual(len(fake.prompts), 1)   # only the scenario call, no extract
         self.assertEqual(len(result['test_scenarios']), 2)
         self.assertEqual(result['requirements'], already_scored)
@@ -542,7 +548,7 @@ class KeepOriginalViewTests(TestCase):
             # Stage 1 (extract) must NOT be called again — only stage 2.
             MockAnalyzer.return_value.analyze.assert_not_called()
             MockAnalyzer.return_value.generate_scenarios_only.assert_called_once_with(
-                'be fast', self.saved_requirements)
+                self.saved_requirements)
         self.assertEqual(self.session.test_scenarios.count(), 1)
 
     def test_keep_original_other_users_session_denied(self):

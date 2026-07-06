@@ -69,11 +69,13 @@ Requirement to analyze:
 
 # Stage 2: test conditions + scenarios for ONE requirement.
 # Called once per requirement, in parallel, so big inputs stay fast.
+# It receives only that requirement's extracted details (not the whole
+# document), so input tokens stay constant no matter how many requirements.
 SCENARIO_PROMPT = """
 You are a senior Software Quality Assurance Engineer designing tests.
 
-The full requirements document is shown below. Generate test conditions and
-test scenarios for ONE requirement only: {req_id} ("{title}").
+Generate test conditions and test scenarios for ONE requirement only: {req_id} ("{title}").
+Its extracted details are shown below.
 
 Return ONLY this JSON object. No markdown fences, no extra text.
 {{
@@ -104,11 +106,11 @@ Rules:
 - Generate 3 to 4 test_conditions covering Positive, Negative, and Boundary.
 - Generate 3 to 4 test_scenarios — link each to its condition via condition_ref.
 - Scenario descriptions must be concise — do NOT write step-by-step instructions.
-- Cover ONLY {req_id}. Ignore the other requirements in the document.
+- Base every condition and scenario on the details below.
 
-Requirements document:
+Requirement details:
 ---
-{requirements_text}
+{requirement_details}
 ---
 """
 
@@ -147,10 +149,10 @@ class QAAnalyzer:
         if result['suggested_requirement'] and not force_full:
             return result
 
-        self._fill_scenarios(result, clean_text)
+        self._fill_scenarios(result)
         return result
 
-    def generate_scenarios_only(self, requirements_text: str, requirements: list) -> dict:
+    def generate_scenarios_only(self, requirements: list) -> dict:
         """
         Stage 2 only, skipping stage 1's extract call. Used when a session
         was already scored earlier (e.g. the user picked "keep my original
@@ -159,7 +161,6 @@ class QAAnalyzer:
         """
         result = self._default_error()
         result['requirements'] = requirements
-        qa = requirements[0] if requirements else {}
         n = len(requirements) or 1
 
         def sev(score):
@@ -176,17 +177,13 @@ class QAAnalyzer:
             'warnings': [],
         }
         result['suggested_requirement'] = ''
-        clean_text = self.preprocessor.clean(requirements_text)
-        self._fill_scenarios(result, clean_text)
+        self._fill_scenarios(result)
         return result
 
-    def _fill_scenarios(self, result: dict, clean_text: str) -> None:
+    def _fill_scenarios(self, result: dict) -> None:
         """Stage 2 in parallel — one scenario call per requirement, merged into result."""
         with ThreadPoolExecutor(max_workers=4) as pool:
-            parts = list(pool.map(
-                lambda req: self._generate_for_requirement(clean_text, req),
-                result['requirements'],
-            ))
+            parts = list(pool.map(self._generate_for_requirement, result['requirements']))
 
         # Merge the parts, renumbering ids so they stay unique across requirements.
         for part_conditions, part_scenarios in parts:
@@ -201,11 +198,27 @@ class QAAnalyzer:
                 s['condition_ref'] = id_map.get(s['condition_ref'], s['condition_ref'])
                 result['test_scenarios'].append(s)
 
-    def _generate_for_requirement(self, clean_text: str, req: dict):
+    def _requirement_summary(self, req: dict) -> str:
+        """Compact text of ONE requirement's extracted details, so stage 2
+        does not need to resend the whole input document."""
+        lines = []
+        for label, key in (('Actors', 'actors'), ('Actions', 'actions'),
+                           ('Business rules', 'business_rules'),
+                           ('Constraints', 'constraints'),
+                           ('Validation rules', 'validation_rules'),
+                           ('Error handling', 'error_handling'),
+                           ('Non-functional', 'non_functional')):
+            items = req.get(key) or []
+            if items:
+                lines.append(label + ': ' + '; '.join(str(i) for i in items))
+        return '\n'.join(lines) or req.get('title', '')
+
+    def _generate_for_requirement(self, req: dict):
         """One stage-2 call: conditions + scenarios for a single requirement."""
         req_id = req['requirement_id']
         prompt = SCENARIO_PROMPT.format(
-            req_id=req_id, title=req['title'], requirements_text=clean_text
+            req_id=req_id, title=req['title'],
+            requirement_details=self._requirement_summary(req),
         )
         raw = self.llm_client.fetch_response(prompt)
         try:

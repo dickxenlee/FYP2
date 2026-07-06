@@ -612,7 +612,7 @@ def analyze_view(request):
         session = _get_accessible_session(keep_session_id, request.user)
         requirements = session.get_extracted_info().get('requirements', [])
         try:
-            qa_result = QAAnalyzer().generate_scenarios_only(session.requirements_text, requirements)
+            qa_result = QAAnalyzer().generate_scenarios_only(requirements)
         except GeminiError as e:
             return JsonResponse({'error': str(e)}, status=e.status)
         TrainingDataManager().reanalyze_session(session, qa_result)
