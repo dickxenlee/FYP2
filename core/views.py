@@ -599,9 +599,22 @@ def analyze_view(request):
         body = json.loads(request.body)
         requirements_text = body.get('requirements_text', '').strip()
         workspace_id = body.get('workspace_id', '').strip()
+        keep_session_id = body.get('keep_session_id')
     except (json.JSONDecodeError, AttributeError):
         requirements_text = request.POST.get('requirements_text', '').strip()
         workspace_id = ''
+        keep_session_id = None
+
+    # User chose "use my original input" on a weak requirement: the session
+    # was already saved without scenarios, so generate the full report now.
+    if keep_session_id:
+        session = _get_accessible_session(keep_session_id, request.user)
+        try:
+            qa_result = QAAnalyzer().analyze(session.requirements_text, force_full=True)
+        except GeminiError as e:
+            return JsonResponse({'error': str(e)}, status=e.status)
+        TrainingDataManager().reanalyze_session(session, qa_result)
+        return JsonResponse(_build_session_response(session))
 
     if not requirements_text:
         return JsonResponse({'error': 'Requirements text is required.'}, status=400)
@@ -620,7 +633,8 @@ def analyze_view(request):
     if requirements_text.startswith(EDITED_PREFIX):
         edited_text = requirements_text[len(EDITED_PREFIX):].strip()
         try:
-            qa_result = QAAnalyzer().analyze(edited_text)
+            # The user already decided — always generate the full report.
+            qa_result = QAAnalyzer().analyze(edited_text, force_full=True)
         except GeminiError as e:
             return JsonResponse({'error': str(e)}, status=e.status)
         session = TrainingDataManager().save_qa_session(

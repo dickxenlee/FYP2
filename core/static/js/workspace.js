@@ -396,9 +396,38 @@ function appendSuggestionConfirmBox(data) {
     block.querySelector('.btn-no').addEventListener('click', function () {
         block.querySelectorAll('button, textarea').forEach(function (el) { el.disabled = true; });
         block.querySelector('.decision-buttons').innerHTML = '<span class="decision-confirmed">&#10007; Using your original input</span>';
+        handleGenerateFromOriginal(data.session_id);
+    });
+}
+
+// Scenarios are not generated for weak input until the user decides,
+// so "use my original input" asks the server to generate them now.
+function handleGenerateFromOriginal(sessionId) {
+    var loadingEl = appendLoading();
+    loadingEl.querySelector('span').textContent = 'Generating test scenarios for your original input…';
+
+    fetch('/analyze/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify({ keep_session_id: sessionId }),
+    })
+    .then(function (res) {
+        var ct = res.headers.get('content-type') || '';
+        if (ct.indexOf('application/json') === -1) {
+            throw new Error('The server took too long or is waking up (free hosting sleeps after inactivity). Please wait about 30 seconds and try again.');
+        }
+        if (!res.ok) return res.json().then(function (err) { throw new Error(err.error || 'Server error'); });
+        return res.json();
+    })
+    .then(function (data) {
+        loadingEl.remove();
         currentSessionId = data.session_id;
         addSessionToHistory(data);
         appendAnalysisResult(data);
+    })
+    .catch(function (err) {
+        loadingEl.remove();
+        appendErrorMessage('Error: ' + err.message);
     });
 }
 

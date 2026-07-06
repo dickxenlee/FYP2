@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 from django.test import TestCase, SimpleTestCase
 from django.contrib.auth.models import User
@@ -384,6 +385,157 @@ class QAParserTests(SimpleTestCase):
         result = QAAnalyzer()._parse('not json at all {oops')
         self.assertEqual(len(result['requirements']), 1)
         self.assertTrue(result['quality_assessment']['warnings'])
+
+
+class FakeLLM:
+    """Stands in for GeminiService: replies based on which prompt it receives."""
+
+    def __init__(self, extract_reply, scenario_replies=None):
+        self.extract_reply = extract_reply
+        self.scenario_replies = scenario_replies or {}
+        self.prompts = []
+
+    def fetch_response(self, prompt):
+        self.prompts.append(prompt)
+        for req_id, reply in self.scenario_replies.items():
+            if 'ONE requirement only: ' + req_id in prompt:
+                return reply
+        return self.extract_reply
+
+
+def _scenario_reply(req_id):
+    """A stage-2 reply with two conditions and two scenarios (local ids)."""
+    return json.dumps({
+        'test_conditions': [
+            {'condition_id': 'C01', 'requirement_ref': req_id,
+             'description': 'valid input accepted', 'type': 'Positive', 'priority': 'High'},
+            {'condition_id': 'C02', 'requirement_ref': req_id,
+             'description': 'invalid input rejected', 'type': 'Negative', 'priority': 'Medium'},
+        ],
+        'test_scenarios': [
+            {'scenario_id': 'TS-001', 'requirement_ref': req_id, 'condition_ref': 'C01',
+             'description': 'happy path', 'preconditions': 'x', 'expected_result': 'ok',
+             'priority': 'High', 'type': 'positive'},
+            {'scenario_id': 'TS-002', 'requirement_ref': req_id, 'condition_ref': 'C02',
+             'description': 'error path', 'preconditions': 'x', 'expected_result': 'error',
+             'priority': 'Medium', 'type': 'negative'},
+        ],
+    })
+
+
+class TwoStageAnalyzerTests(SimpleTestCase):
+    """The two-stage analyze flow: weak input stops early to save tokens,
+    strong input generates scenarios per requirement in parallel."""
+
+    WEAK_EXTRACT = json.dumps({
+        'requirements': [{'requirement_id': 'REQ-001', 'title': 'Vague thing',
+                          'clarity_score': 30, 'completeness_score': 30, 'testability_score': 30}],
+        'quality_assessment': {'positive_aspects': [], 'warnings': ['too vague']},
+        'gaps': [],
+        'suggested_requirement': 'The system shall respond within 2 seconds.',
+    })
+
+    STRONG_EXTRACT = json.dumps({
+        'requirements': [
+            {'requirement_id': 'REQ-001', 'title': 'Login',
+             'clarity_score': 90, 'completeness_score': 90, 'testability_score': 90},
+            {'requirement_id': 'REQ-002', 'title': 'Fine payment',
+             'clarity_score': 85, 'completeness_score': 85, 'testability_score': 85},
+        ],
+        'quality_assessment': {'positive_aspects': ['clear'], 'warnings': []},
+        'gaps': [],
+        'suggested_requirement': '',
+    })
+
+    def analyzer_with(self, fake):
+        analyzer = QAAnalyzer()
+        analyzer.llm_client = fake
+        return analyzer
+
+    def test_weak_input_stops_after_one_call(self):
+        fake = FakeLLM(self.WEAK_EXTRACT)
+        result = self.analyzer_with(fake).analyze('be fast and easy')
+        self.assertEqual(len(fake.prompts), 1)
+        self.assertEqual(result['test_conditions'], [])
+        self.assertEqual(result['test_scenarios'], [])
+        self.assertTrue(result['suggested_requirement'])
+
+    def test_weak_input_force_full_generates_scenarios(self):
+        fake = FakeLLM(self.WEAK_EXTRACT, {'REQ-001': _scenario_reply('REQ-001')})
+        result = self.analyzer_with(fake).analyze('be fast and easy', force_full=True)
+        self.assertEqual(len(fake.prompts), 2)   # extract + one scenario call
+        self.assertEqual(len(result['test_scenarios']), 2)
+
+    def test_strong_input_generates_per_requirement_and_merges_ids(self):
+        fake = FakeLLM(self.STRONG_EXTRACT, {
+            'REQ-001': _scenario_reply('REQ-001'),
+            'REQ-002': _scenario_reply('REQ-002'),
+        })
+        result = self.analyzer_with(fake).analyze('login and fine payment')
+        self.assertEqual(len(fake.prompts), 3)   # extract + 2 parallel scenario calls
+        conditions, scenarios = result['test_conditions'], result['test_scenarios']
+        self.assertEqual([c['condition_id'] for c in conditions], ['C01', 'C02', 'C03', 'C04'])
+        self.assertEqual([s['id'] for s in scenarios], ['TS-001', 'TS-002', 'TS-003', 'TS-004'])
+        # REQ-002's local C01 must be remapped to its merged id C03
+        self.assertEqual(scenarios[2]['requirement_ref'], 'REQ-002')
+        self.assertEqual(scenarios[2]['condition_ref'], 'C03')
+
+    def test_broken_scenario_reply_gives_empty_lists_not_crash(self):
+        fake = FakeLLM(self.STRONG_EXTRACT, {
+            'REQ-001': 'not json {oops',
+            'REQ-002': _scenario_reply('REQ-002'),
+        })
+        result = self.analyzer_with(fake).analyze('login and fine payment')
+        # REQ-001's broken reply is skipped; REQ-002 still comes through
+        self.assertEqual(len(result['test_scenarios']), 2)
+        self.assertEqual(result['test_scenarios'][0]['requirement_ref'], 'REQ-002')
+
+
+class KeepOriginalViewTests(TestCase):
+    """POST /analyze/ with keep_session_id fills in scenarios for the
+    already-saved weak session (the 'use my original input' button)."""
+
+    def setUp(self):
+        self.user = User.objects.create_user('dick', '', 'pw')
+        self.client.force_login(self.user)
+        self.session = AnalysisSession.objects.create(
+            user=self.user, title='weak', requirements_text='be fast',
+            accuracy_score=30, requirement_id='REQ-001',
+        )
+
+    def test_keep_original_generates_full_report(self):
+        full_result = {
+            'requirements': [{'requirement_id': 'REQ-001', 'title': 'Speed',
+                              'clarity_score': 30, 'completeness_score': 30,
+                              'testability_score': 30, 'overall_score': 30, 'severity': 'High'}],
+            'quality_assessment': {'clarity_score': 30, 'completeness_score': 30,
+                                   'testability_score': 30, 'overall_score': 30,
+                                   'severity': 'High', 'positive_aspects': [], 'warnings': ['vague']},
+            'test_conditions': [],
+            'gaps': [],
+            'test_scenarios': [{'id': 'TS-001', 'requirement_ref': 'REQ-001',
+                                'condition_ref': 'C01', 'description': 'd', 'preconditions': 'p',
+                                'steps': [], 'expected_result': 'e', 'priority': 'High',
+                                'type': 'positive'}],
+            'suggested_requirement': 'The system shall respond within 2 seconds.',
+        }
+        with patch('core.views.QAAnalyzer') as MockAnalyzer:
+            MockAnalyzer.return_value.analyze.return_value = full_result
+            r = self.client.post('/analyze/',
+                                 json.dumps({'keep_session_id': self.session.id}),
+                                 content_type='application/json')
+            self.assertEqual(r.status_code, 200)
+            MockAnalyzer.return_value.analyze.assert_called_once_with(
+                'be fast', force_full=True)
+        self.assertEqual(self.session.test_scenarios.count(), 1)
+
+    def test_keep_original_other_users_session_denied(self):
+        other = User.objects.create_user('other', '', 'pw')
+        self.client.force_login(other)
+        r = self.client.post('/analyze/',
+                             json.dumps({'keep_session_id': self.session.id}),
+                             content_type='application/json')
+        self.assertEqual(r.status_code, 404)
 
 
 class TextPreprocessorTests(SimpleTestCase):
