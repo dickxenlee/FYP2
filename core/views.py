@@ -369,6 +369,11 @@ def generate_from_draft_view(request, workspace_id):
     combined = '\n\n'.join(d.text.strip() for d in inputs if d.text.strip())
     if not combined:
         return JsonResponse({'error': 'No team input to generate from.'}, status=400)
+    if not _is_meaningful_requirement(combined):
+        return JsonResponse(
+            {'error': 'Please enter a complete requirement sentence (at least a few words).'},
+            status=400,
+        )
 
     try:
         qa_result = QAAnalyzer().analyze(combined)
@@ -592,6 +597,13 @@ def my_workspaces_state_view(request):
 # Analyze requirements — Phase 3 QA redesign
 # ─────────────────────────────────────────────
 
+def _is_meaningful_requirement(text: str) -> bool:
+    """True if the text has enough letters and words to be a real requirement.
+    Blocks junk like '.' or 'abc' so the AI does not hallucinate from nothing."""
+    letters = sum(ch.isalpha() for ch in text)
+    return letters >= 10 and len(text.split()) >= 3
+
+
 @login_required
 @require_POST
 def analyze_view(request):
@@ -634,6 +646,11 @@ def analyze_view(request):
     EDITED_PREFIX = 'EDITED:'
     if requirements_text.startswith(EDITED_PREFIX):
         edited_text = requirements_text[len(EDITED_PREFIX):].strip()
+        if not _is_meaningful_requirement(edited_text):
+            return JsonResponse(
+                {'error': 'Please enter a complete requirement sentence (at least a few words).'},
+                status=400,
+            )
         try:
             # The user already decided — always generate the full report.
             qa_result = QAAnalyzer().analyze(edited_text, force_full=True)
@@ -650,6 +667,12 @@ def analyze_view(request):
         resp = _build_session_response(session)
         resp['system_action'] = 'analysis_and_generation'
         return JsonResponse(resp)
+
+    if not _is_meaningful_requirement(requirements_text):
+        return JsonResponse(
+            {'error': 'Please enter a complete requirement sentence (at least a few words).'},
+            status=400,
+        )
 
     try:
         qa_result = QAAnalyzer().analyze(requirements_text)

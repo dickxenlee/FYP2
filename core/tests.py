@@ -560,6 +560,40 @@ class KeepOriginalViewTests(TestCase):
         self.assertEqual(r.status_code, 404)
 
 
+class MeaningfulInputTests(SimpleTestCase):
+    """The guard that blocks junk input (like '.') before it reaches the AI."""
+
+    def test_junk_is_rejected(self):
+        from core.views import _is_meaningful_requirement
+        self.assertFalse(_is_meaningful_requirement('.'))
+        self.assertFalse(_is_meaningful_requirement('abc'))
+        self.assertFalse(_is_meaningful_requirement('12345'))
+        self.assertFalse(_is_meaningful_requirement('   '))
+
+    def test_real_requirement_is_accepted(self):
+        from core.views import _is_meaningful_requirement
+        self.assertTrue(_is_meaningful_requirement('The system shall let a user log in.'))
+        self.assertTrue(_is_meaningful_requirement('be fast and easy to use'))
+
+
+class AnalyzeInputValidationTests(TestCase):
+    """POST /analyze/ rejects meaningless input with 400 before calling the AI."""
+
+    def setUp(self):
+        self.user = User.objects.create_user('vi', '', 'pw')
+        self.client.force_login(self.user)
+
+    def test_dot_input_rejected(self):
+        r = self.client.post('/analyze/', json.dumps({'requirements_text': '.'}),
+                             content_type='application/json')
+        self.assertEqual(r.status_code, 400)
+
+    def test_short_junk_rejected(self):
+        r = self.client.post('/analyze/', json.dumps({'requirements_text': 'abc'}),
+                             content_type='application/json')
+        self.assertEqual(r.status_code, 400)
+
+
 class TextPreprocessorTests(SimpleTestCase):
     """The NLP text-normalization step applied before the LLM analysis."""
 
