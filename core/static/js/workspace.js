@@ -506,15 +506,16 @@ function populateReport(block, data, revealScenarios) {
     if (data.requirements && data.requirements.length > 0) {
         html += buildRequirementsSection(data.requirements);
     }
-    // 4. Test Conditions
-    if (data.test_conditions && data.test_conditions.length > 0) {
-        html += buildTestConditionsSection(data.test_conditions);
-    }
 
-    // 5. Traceable Test Scenarios (+ 6. Detailed Test Cases) — behind the gate.
+    // 4-6. Test Conditions, Test Scenarios and Detailed Cases — behind the gate.
+    // Only the analysis is shown first; the reviewer clicks "Generate Test
+    // Scenarios" to reveal the test conditions, scenarios and detailed cases.
     if (hasScenarios && !reveal) {
         html += buildScenarioGateHtml();
     } else if (hasScenarios) {
+        if (data.test_conditions && data.test_conditions.length > 0) {
+            html += buildTestConditionsSection(data.test_conditions);
+        }
         html += buildTestScenariosSection(data.scenarios);
         html += buildDetailedSectionHtml(data);
         block.dataset.scenariosRevealed = '1';
@@ -841,10 +842,10 @@ function buildTestScenariosSection(scenarios) {
 // checking the quality, findings, analysis and conditions above.
 function buildScenarioGateHtml() {
     var html = '<div class="qa-section scenario-gate-section">';
-    html += '<div class="qa-section-header"><span class="section-num">5</span>Traceable Test Scenarios</div>';
+    html += '<div class="qa-section-header"><span class="section-num">4</span>Test Conditions &amp; Scenarios</div>';
     html += '<div class="scenario-gate">';
-    html += '<p class="scenario-gate-text">Review the quality assessment, review findings, requirement analysis and test conditions above. When you are ready, generate the traceable test scenarios.</p>';
-    html += '<button class="btn-generate-scenarios">&#9889;&nbsp; Generate Test Scenarios</button>';
+    html += '<p class="scenario-gate-text">Review the quality assessment, review findings and requirement analysis above. When you are ready, generate the test conditions, traceable test scenarios and detailed test cases.</p>';
+    html += '<button class="btn-generate-scenarios">&#9889;&nbsp; Generate Test Conditions &amp; Scenarios</button>';
     html += '</div></div>';
     return html;
 }
