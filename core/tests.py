@@ -447,6 +447,16 @@ class TwoStageAnalyzerTests(SimpleTestCase):
         'suggested_requirement': '',
     })
 
+    # A good requirement (score >= 80) where the AI wrongly ALSO returned a
+    # rewrite suggestion. Scenarios must still be generated in this case.
+    GOOD_WITH_STRAY_SUGGESTION = json.dumps({
+        'requirements': [{'requirement_id': 'REQ-001', 'title': 'Borrow book',
+                          'clarity_score': 88, 'completeness_score': 87, 'testability_score': 86}],
+        'quality_assessment': {'positive_aspects': ['clear'], 'warnings': []},
+        'gaps': [],
+        'suggested_requirement': 'The system shall let a student borrow a book within 2 seconds.',
+    })
+
     def analyzer_with(self, fake):
         analyzer = QAAnalyzer()
         analyzer.llm_client = fake
@@ -459,6 +469,14 @@ class TwoStageAnalyzerTests(SimpleTestCase):
         self.assertEqual(result['test_conditions'], [])
         self.assertEqual(result['test_scenarios'], [])
         self.assertTrue(result['suggested_requirement'])
+
+    def test_good_input_with_stray_suggestion_still_generates_scenarios(self):
+        # Score is 87 (good), but the AI also returned a suggestion. The
+        # scenarios must still be generated, and the stray suggestion dropped.
+        fake = FakeLLM(self.GOOD_WITH_STRAY_SUGGESTION, {'REQ-001': _scenario_reply('REQ-001')})
+        result = self.analyzer_with(fake).analyze('a clear requirement')
+        self.assertEqual(len(result['test_scenarios']), 2)
+        self.assertEqual(result['suggested_requirement'], '')
 
     def test_weak_input_force_full_generates_scenarios(self):
         fake = FakeLLM(self.WEAK_EXTRACT, {'REQ-001': _scenario_reply('REQ-001')})

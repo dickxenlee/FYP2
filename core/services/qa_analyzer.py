@@ -67,10 +67,7 @@ Requirement to analyze:
 ---
 """
 
-# Stage 2: test conditions + scenarios for ONE requirement.
-# Called once per requirement, in parallel, so big inputs stay fast.
-# It receives only that requirement's extracted details (not the whole
-# document), so input tokens stay constant no matter how many requirements.
+# Stage 2: test conditions + scenarios for ONE requirement (run in parallel).
 SCENARIO_PROMPT = """
 You are a senior Software Quality Assurance Engineer designing tests.
 
@@ -116,49 +113,37 @@ Requirement details:
 
 
 class QAAnalyzer:
-    """
-    Two-stage QA analysis.
-    Stage 1 (one small call): extract requirements, score them, find gaps,
-    and suggest a rewrite if the input is weak.
-    Stage 2 (one call per requirement, run in parallel): generate test
-    conditions and test scenarios.
-    Weak input stops after stage 1 — the user first chooses between their
-    original text and the suggested rewrite, so no tokens are wasted
-    generating scenarios that would be thrown away.
-    """
+    """Two-stage QA analysis: stage 1 scores + suggests a rewrite; stage 2 generates the tests in parallel."""
 
     def __init__(self):
         self.llm_client = GeminiService()
         self.preprocessor = TextPreprocessor()
 
     def analyze(self, requirements_text: str, force_full: bool = False) -> dict:
-        """
-        Returns a dict with keys:
-        requirements (list), quality_assessment, test_conditions, gaps,
-        test_scenarios, suggested_requirement.
-        If the input is weak (a rewrite was suggested) and force_full is
-        False, test_conditions and test_scenarios are returned empty.
-        """
+        """Analyse the text. Weak input (force_full=False) stops after scoring, with no scenarios yet."""
         clean_text = self.preprocessor.clean(requirements_text)
         raw = self.llm_client.fetch_response(
             EXTRACT_PROMPT.format(requirements_text=clean_text)
         )
         result = self._parse(raw)
 
-        # Weak input: stop here, let the user decide before spending tokens.
-        if result['suggested_requirement'] and not force_full:
+        # Weak input (overall score below 80): stop here so the user can pick
+        # the rewrite before we spend tokens generating scenarios. The score is
+        # what decides this, not just the presence of a suggestion — the AI
+        # sometimes returns a rewrite even for a good requirement.
+        is_weak = result['quality_assessment']['overall_score'] < 80
+        if is_weak and result['suggested_requirement'] and not force_full:
             return result
 
+        # Good input: drop any stray suggestion so it is not shown, then
+        # generate the full test conditions and scenarios.
+        if not is_weak:
+            result['suggested_requirement'] = ''
         self._fill_scenarios(result)
         return result
 
     def generate_scenarios_only(self, requirements: list) -> dict:
-        """
-        Stage 2 only, skipping stage 1's extract call. Used when a session
-        was already scored earlier (e.g. the user picked "keep my original
-        input" after seeing a weak-input suggestion) — re-extracting the
-        same text again would waste a call.
-        """
+        """Stage 2 only, reusing scores from an earlier analysis (used by "keep my original input")."""
         result = self._default_error()
         result['requirements'] = requirements
         n = len(requirements) or 1
